@@ -37,6 +37,17 @@
   var currentArtworkId = null;
   var pollTimer = null;
 
+  // B009: when /artwork/<id> 404s (or fails to decode), hide the broken
+  // <img> and reveal the text fallback. Re-armed on every new trackId.
+  els.art.addEventListener("error", function () {
+    els.art.style.display = "none";
+    els.artFallback.hidden = false;
+  });
+  els.art.addEventListener("load", function () {
+    els.art.style.display = "";
+    els.artFallback.hidden = true;
+  });
+
   function fmtTime(secs) {
     if (!isFinite(secs) || secs < 0) secs = 0;
     var s = Math.floor(secs);
