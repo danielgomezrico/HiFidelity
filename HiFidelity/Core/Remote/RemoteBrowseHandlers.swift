@@ -160,6 +160,7 @@ extension RemoteControlServer {
     private func registerQueueFromBrowseRoutes(on server: HTTPServer) async {
         // POST /queue/playTracks { trackIds: [Int64], startAt: Int }
         await server.appendRoute("POST /queue/playTracks") { request in
+            guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
             guard let body = try? await request.bodyData,
                   let req = try? JSONDecoder().decode(PlayTracksRequest.self, from: body) else {
                 return RemoteResponse.badRequest("invalid body")
@@ -185,6 +186,7 @@ extension RemoteControlServer {
 
         // POST /queue/add { trackIds: [Int64] }
         await server.appendRoute("POST /queue/add") { request in
+            guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
             guard let body = try? await request.bodyData,
                   let req = try? JSONDecoder().decode(TrackIdsRequest.self, from: body) else {
                 return RemoteResponse.badRequest("invalid body")
@@ -209,6 +211,7 @@ extension RemoteControlServer {
 
         // POST /queue/playNext { trackIds: [Int64] }
         await server.appendRoute("POST /queue/playNext") { request in
+            guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
             guard let body = try? await request.bodyData,
                   let req = try? JSONDecoder().decode(TrackIdsRequest.self, from: body) else {
                 return RemoteResponse.badRequest("invalid body")
