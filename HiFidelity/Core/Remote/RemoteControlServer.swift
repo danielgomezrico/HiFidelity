@@ -8,6 +8,7 @@
 
 import Foundation
 import FlyingFox
+import Network
 
 /// Long-lived `@MainActor` singleton that owns the FlyingFox `HTTPServer`
 /// instance and its lifecycle. Reads/writes must occur on the main actor;
@@ -22,6 +23,8 @@ final class RemoteControlServer: ObservableObject {
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var port: UInt16
     @Published private(set) var bonjourName: String
+    @Published private(set) var primaryURL: URL?
+    @Published private(set) var allURLs: [URL] = []
 
     // MARK: - Private
 
@@ -29,6 +32,7 @@ final class RemoteControlServer: ObservableObject {
     private var serverTask: Task<Void, Never>?
     private var netService: NetService?
     private var bonjourDelegate: RemoteBonjourDelegate?
+    private var pathMonitor: NWPathMonitor?
 
     private init() {
         // Resolve initial port + Bonjour name from UserDefaults via the
@@ -90,11 +94,19 @@ final class RemoteControlServer: ObservableObject {
         // Publish Bonjour AFTER the listener is up. NetService runs on the
         // main run loop; we are already on @MainActor here.
         publishBonjour(name: resolvedName, port: resolvedPort)
+
+        // Start watching interface changes so Settings always shows live
+        // URLs after Wi-Fi joins/leaves, Tailscale toggles, etc.
+        startPathMonitor()
+        refreshAllURLs()
     }
 
     /// Stop the HTTP server. No-op if not running.
     func stop() async {
+        stopPathMonitor()
         unpublishBonjour()
+        primaryURL = nil
+        allURLs = []
         guard let httpServer = server else {
             isRunning = false
             return
@@ -139,6 +151,47 @@ final class RemoteControlServer: ObservableObject {
         netService?.remove(from: .main, forMode: .default)
         netService = nil
         bonjourDelegate = nil
+    }
+
+    // MARK: - Path monitoring + URL list
+
+    private func startPathMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshAllURLs()
+            }
+        }
+        monitor.start(queue: .main)
+        self.pathMonitor = monitor
+    }
+
+    private func stopPathMonitor() {
+        pathMonitor?.cancel()
+        pathMonitor = nil
+    }
+
+    /// Refresh the list of URLs that point at this server. Called whenever
+    /// `NWPathMonitor` reports an interface change.
+    func refreshAllURLs() {
+        let port = self.port
+        let ips = NetworkInterfaceLister.activeIPv4Addresses()
+        var urls: [URL] = []
+        for ip in ips {
+            if let url = URL(string: "http://\(ip):\(port)/") {
+                urls.append(url)
+            }
+        }
+        self.allURLs = urls
+
+        // Primary URL: prefer the Bonjour <name>.local form (works on all
+        // Apple devices, falls through router NAT). Fallback to the first
+        // en* IPv4 address if Bonjour is not yet published.
+        if !bonjourName.isEmpty {
+            self.primaryURL = URL(string: "http://\(bonjourName).local:\(port)/")
+        } else {
+            self.primaryURL = urls.first
+        }
     }
 
     /// Convenience: stop then start. Used by Settings when the user edits
