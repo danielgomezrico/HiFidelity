@@ -30,9 +30,16 @@ extension RemoteControlServer {
             let q = request.query.first(where: { $0.name == "q" })?.value
             do {
                 if let q, !q.isEmpty {
-                    let tracks = try await DatabaseManager.shared.searchTracks(query: q, limit: limit)
-                    let dtos = tracks.compactMap { RemoteTrack($0) }
-                    return jsonResponse(RemoteTracksPage(tracks: dtos, total: dtos.count, limit: limit, offset: 0))
+                    // B004: fetch up to `offset + limit` weighted results and
+                    // slice the requested page out. `total` reflects the real
+                    // match count up to the search ceiling.
+                    let ceiling = max(1, min(offset + limit, 10_000))
+                    let allMatches = try await DatabaseManager.shared.searchTracks(query: q, limit: ceiling)
+                    let allDTOs = allMatches.compactMap { RemoteTrack($0) }
+                    let lower = min(offset, allDTOs.count)
+                    let upper = min(lower + limit, allDTOs.count)
+                    let page = Array(allDTOs[lower..<upper])
+                    return jsonResponse(RemoteTracksPage(tracks: page, total: allDTOs.count, limit: limit, offset: offset))
                 }
                 let (page, total) = try await fetchTracksPage(limit: limit, offset: offset)
                 return jsonResponse(RemoteTracksPage(tracks: page, total: total, limit: limit, offset: offset))
