@@ -27,6 +27,8 @@ final class RemoteControlServer: ObservableObject {
 
     private var server: HTTPServer?
     private var serverTask: Task<Void, Never>?
+    private var netService: NetService?
+    private var bonjourDelegate: RemoteBonjourDelegate?
 
     private init() {
         // Resolve initial port + Bonjour name from UserDefaults via the
@@ -84,10 +86,15 @@ final class RemoteControlServer: ObservableObject {
         self.bonjourName = resolvedName
         self.isRunning = true
         Logger.info("RemoteControlServer started on port \(resolvedPort)")
+
+        // Publish Bonjour AFTER the listener is up. NetService runs on the
+        // main run loop; we are already on @MainActor here.
+        publishBonjour(name: resolvedName, port: resolvedPort)
     }
 
     /// Stop the HTTP server. No-op if not running.
     func stop() async {
+        unpublishBonjour()
         guard let httpServer = server else {
             isRunning = false
             return
@@ -98,6 +105,40 @@ final class RemoteControlServer: ObservableObject {
         serverTask = nil
         isRunning = false
         Logger.info("RemoteControlServer stopped")
+    }
+
+    // MARK: - Bonjour
+
+    /// Publish the HTTP service over mDNS as `_hifidelity._tcp`. Auto-rename
+    /// is allowed; `RemoteBonjourDelegate` writes the resolved name back to
+    /// `bonjourName` so Settings reflects reality.
+    private func publishBonjour(name: String, port: UInt16) {
+        let svc = NetService(
+            domain: "local.",
+            type: "_hifidelity._tcp.",
+            name: name,
+            port: Int32(port)
+        )
+        let delegate = RemoteBonjourDelegate { [weak self] resolvedName in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.bonjourName != resolvedName {
+                    self.bonjourName = resolvedName
+                }
+            }
+        }
+        svc.delegate = delegate
+        svc.schedule(in: .main, forMode: .default)
+        svc.publish()
+        self.netService = svc
+        self.bonjourDelegate = delegate
+    }
+
+    private func unpublishBonjour() {
+        netService?.stop()
+        netService?.remove(from: .main, forMode: .default)
+        netService = nil
+        bonjourDelegate = nil
     }
 
     /// Convenience: stop then start. Used by Settings when the user edits
@@ -131,20 +172,15 @@ final class RemoteControlServer: ObservableObject {
             }
             let tag = RemoteETag.etag(forJSON: data)
             if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
-                return HTTPResponse(
-                    statusCode: .notModified,
-                    headers: [.eTag: tag, HTTPHeader("Cache-Control"): "no-store"]
-                )
+                let headers: HTTPHeaders = [.eTag: tag, HTTPHeader("Cache-Control"): "no-store"]
+                return HTTPResponse(statusCode: .notModified, headers: headers)
             }
-            return HTTPResponse(
-                statusCode: .ok,
-                headers: [
-                    .contentType: "application/json; charset=utf-8",
-                    .eTag: tag,
-                    HTTPHeader("Cache-Control"): "no-store"
-                ],
-                body: data
-            )
+            let headers: HTTPHeaders = [
+                .contentType: "application/json; charset=utf-8",
+                .eTag: tag,
+                HTTPHeader("Cache-Control"): "no-store"
+            ]
+            return HTTPResponse(statusCode: .ok, headers: headers, body: data)
         }
 
         // GET /artwork/:trackId — raw bytes; content-addressable so any
@@ -152,32 +188,28 @@ final class RemoteControlServer: ObservableObject {
         await server.appendRoute("GET /artwork/:trackId") { request in
             guard let raw = request.routeParameters["trackId"],
                   let trackId = Int64(raw) else {
+                let headers: HTTPHeaders = [.contentType: "application/json; charset=utf-8"]
                 return HTTPResponse(
                     statusCode: .badRequest,
-                    headers: [.contentType: "application/json; charset=utf-8"],
+                    headers: headers,
                     body: Data(#"{"error":"invalid trackId"}"#.utf8)
                 )
             }
             let tag = "\"track-\(trackId)\""
             if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
-                return HTTPResponse(
-                    statusCode: .notModified,
-                    headers: [.eTag: tag, HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"]
-                )
+                let headers: HTTPHeaders = [.eTag: tag, HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"]
+                return HTTPResponse(statusCode: .notModified, headers: headers)
             }
             do {
                 guard let result = try RemoteArtworkLoader.data(forTrackId: trackId) else {
                     return HTTPResponse(statusCode: .notFound)
                 }
-                return HTTPResponse(
-                    statusCode: .ok,
-                    headers: [
-                        .contentType: result.contentType,
-                        .eTag: tag,
-                        HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"
-                    ],
-                    body: result.data
-                )
+                let headers: HTTPHeaders = [
+                    .contentType: result.contentType,
+                    .eTag: tag,
+                    HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"
+                ]
+                return HTTPResponse(statusCode: .ok, headers: headers, body: result.data)
             } catch {
                 Logger.error("RemoteControlServer /artwork/\(trackId) DB read failed: \(error)")
                 return HTTPResponse(statusCode: .internalServerError)
