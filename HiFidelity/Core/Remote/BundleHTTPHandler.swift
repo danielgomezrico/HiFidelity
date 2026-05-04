@@ -45,7 +45,7 @@ struct BundleHTTPHandler: HTTPHandler {
         )
         guard let url else {
             Logger.error("BundleHTTPHandler: missing \(subdirectory)/\(resourceName).\(resourceExtension)")
-            return HTTPResponse(statusCode: .notFound)
+            return RemoteResponse.notFound("not found")
         }
         do {
             let data = try Data(contentsOf: url)
@@ -56,7 +56,7 @@ struct BundleHTTPHandler: HTTPHandler {
             return HTTPResponse(statusCode: .ok, headers: headers, body: data)
         } catch {
             Logger.error("BundleHTTPHandler: read failed for \(url.lastPathComponent): \(error)")
-            return HTTPResponse(statusCode: .internalServerError)
+            return RemoteResponse.serverError("read failed")
         }
     }
 }

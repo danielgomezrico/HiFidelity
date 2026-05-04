@@ -38,7 +38,7 @@ extension RemoteControlServer {
                 return jsonResponse(RemoteTracksPage(tracks: page, total: total, limit: limit, offset: offset))
             } catch {
                 Logger.error("RemoteControlServer /tracks failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
 
@@ -63,7 +63,7 @@ extension RemoteControlServer {
                 return jsonResponse(dtos)
             } catch {
                 Logger.error("RemoteControlServer /albums failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
 
@@ -88,7 +88,7 @@ extension RemoteControlServer {
                 return jsonResponse(dtos)
             } catch {
                 Logger.error("RemoteControlServer /artists failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
 
@@ -104,7 +104,7 @@ extension RemoteControlServer {
                 return jsonResponse(dtos)
             } catch {
                 Logger.error("RemoteControlServer /playlists failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
     }
@@ -122,7 +122,7 @@ extension RemoteControlServer {
                 return jsonResponse(tracks.compactMap { RemoteTrack($0) })
             } catch {
                 Logger.error("RemoteControlServer /albums/\(id)/tracks failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
 
@@ -136,7 +136,7 @@ extension RemoteControlServer {
                 return jsonResponse(tracks.compactMap { RemoteTrack($0) })
             } catch {
                 Logger.error("RemoteControlServer /artists/\(id)/tracks failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
 
@@ -150,7 +150,7 @@ extension RemoteControlServer {
                 return jsonResponse(tracks.compactMap { RemoteTrack($0) })
             } catch {
                 Logger.error("RemoteControlServer /playlists/\(id)/tracks failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
     }
@@ -180,7 +180,7 @@ extension RemoteControlServer {
                 return RemoteResponse.ok
             } catch {
                 Logger.error("RemoteControlServer /queue/playTracks failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
 
@@ -205,7 +205,7 @@ extension RemoteControlServer {
                 return RemoteResponse.ok
             } catch {
                 Logger.error("RemoteControlServer /queue/add failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
 
@@ -235,7 +235,7 @@ extension RemoteControlServer {
                 return RemoteResponse.ok
             } catch {
                 Logger.error("RemoteControlServer /queue/playNext failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("internal error")
             }
         }
     }
@@ -257,7 +257,7 @@ private func jsonResponse<T: Encodable>(_ value: T) -> HTTPResponse {
         )
     } catch {
         Logger.error("RemoteControlServer JSON encode failed: \(error)")
-        return HTTPResponse(statusCode: .internalServerError)
+        return RemoteResponse.serverError("encode failed")
     }
 }
 

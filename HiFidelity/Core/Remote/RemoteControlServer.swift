@@ -286,7 +286,7 @@ final class RemoteControlServer: ObservableObject {
                 data = try RemoteETag.canonicalJSONEncoder.encode(state)
             } catch {
                 Logger.error("RemoteControlServer /state encode failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("state encode failed")
             }
             let tag = RemoteETag.etag(forJSON: data)
             if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
@@ -316,7 +316,7 @@ final class RemoteControlServer: ObservableObject {
             do {
                 // Existence check first — return 404 before any ETag work.
                 guard let result = try RemoteArtworkLoader.data(forTrackId: trackId) else {
-                    return HTTPResponse(statusCode: .notFound)
+                    return RemoteResponse.notFound("not found")
                 }
                 let tag = RemoteETag.artworkETag(trackId: trackId, bytes: result.data)
                 if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
@@ -334,7 +334,7 @@ final class RemoteControlServer: ObservableObject {
                 return HTTPResponse(statusCode: .ok, headers: headers, body: result.data)
             } catch {
                 Logger.error("RemoteControlServer /artwork/\(trackId) DB read failed: \(error)")
-                return HTTPResponse(statusCode: .internalServerError)
+                return RemoteResponse.serverError("artwork read failed")
             }
         }
         await server.appendRoute("GET /artwork/:trackId", handler: artworkHandler)
