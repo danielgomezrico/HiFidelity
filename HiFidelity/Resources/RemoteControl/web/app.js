@@ -213,6 +213,16 @@
   var navStack = [];
   var searchDebounce = null;
 
+  // B013: cancel any pending search debounce — call on every nav transition
+  // (tab switch, back, close, entity push) so a stale "Tracks" search can't
+  // populate an "Albums" drawer after the tab changed.
+  function cancelSearchDebounce() {
+    if (searchDebounce) {
+      clearTimeout(searchDebounce);
+      searchDebounce = null;
+    }
+  }
+
   function fmtSeconds(secs) {
     return fmtTime(secs || 0);
   }
@@ -223,9 +233,11 @@
     renderCurrent();
   }
   function hideDrawer() {
+    cancelSearchDebounce();
     drawerEls.drawer.hidden = true;
   }
   function popOrClose() {
+    cancelSearchDebounce();
     if (navStack.length > 1) {
       navStack.pop();
       renderCurrent();
@@ -357,6 +369,7 @@
       row.querySelector(".row-sub").textContent = (a.albumArtist || "Various Artists") + (a.year ? " · " + a.year : "");
       row.querySelector(".row-meta").textContent = a.trackCount + (a.trackCount === 1 ? " track" : " tracks");
       row.addEventListener("click", function () {
+        cancelSearchDebounce();
         navStack.push({ kind: "album", id: a.id, name: a.title || "Album" });
         renderCurrent();
       });
@@ -381,6 +394,7 @@
       row.querySelector(".row-sub").textContent = a.albumCount + (a.albumCount === 1 ? " album" : " albums");
       row.querySelector(".row-meta").textContent = a.trackCount + (a.trackCount === 1 ? " track" : " tracks");
       row.addEventListener("click", function () {
+        cancelSearchDebounce();
         navStack.push({ kind: "artist", id: a.id, name: a.name || "Artist" });
         renderCurrent();
       });
@@ -405,6 +419,7 @@
       row.querySelector(".row-sub").textContent = p.isSmart ? "Smart playlist" : (p.description || "");
       row.querySelector(".row-meta").textContent = p.trackCount + (p.trackCount === 1 ? " track" : " tracks");
       row.addEventListener("click", function () {
+        cancelSearchDebounce();
         navStack.push({ kind: "playlist", id: p.id, name: p.name || "Playlist" });
         renderCurrent();
       });
@@ -418,6 +433,7 @@
   drawerEls.back.addEventListener("click", popOrClose);
   drawerEls.tabs.forEach(function (b) {
     b.addEventListener("click", function () {
+      cancelSearchDebounce();
       navStack = [{ kind: "list", tab: b.dataset.tab, q: "" }];
       renderCurrent();
     });
@@ -425,8 +441,9 @@
   drawerEls.search.addEventListener("input", function (e) {
     var top = navStack[navStack.length - 1];
     if (!top || top.kind !== "list") return;
-    if (searchDebounce) clearTimeout(searchDebounce);
+    cancelSearchDebounce();
     searchDebounce = setTimeout(function () {
+      searchDebounce = null;
       top.q = e.target.value.trim();
       loadList(top);
     }, 220);
