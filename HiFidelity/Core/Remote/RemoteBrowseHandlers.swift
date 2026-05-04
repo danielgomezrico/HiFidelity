@@ -57,7 +57,13 @@ extension RemoteControlServer {
             do {
                 let albums: [Album]
                 if let q, !q.isEmpty {
-                    albums = try await DatabaseManager.shared.searchAlbums(query: q, limit: limit)
+                    // B005: paginate search results in-memory since
+                    // `searchAlbums` doesn't take an offset.
+                    let ceiling = max(1, min(offset + limit, 10_000))
+                    let all = try await DatabaseManager.shared.searchAlbums(query: q, limit: ceiling)
+                    let lower = min(offset, all.count)
+                    let upper = min(lower + limit, all.count)
+                    albums = Array(all[lower..<upper])
                 } else {
                     albums = try await DatabaseManager.shared.dbQueue.read { db -> [Album] in
                         try Album
@@ -82,7 +88,13 @@ extension RemoteControlServer {
             do {
                 let artists: [Artist]
                 if let q, !q.isEmpty {
-                    artists = try await DatabaseManager.shared.searchArtists(query: q, limit: limit)
+                    // B005: paginate search results in-memory since
+                    // `searchArtists` doesn't take an offset.
+                    let ceiling = max(1, min(offset + limit, 10_000))
+                    let all = try await DatabaseManager.shared.searchArtists(query: q, limit: ceiling)
+                    let lower = min(offset, all.count)
+                    let upper = min(lower + limit, all.count)
+                    artists = Array(all[lower..<upper])
                 } else {
                     artists = try await DatabaseManager.shared.dbQueue.read { db -> [Artist] in
                         try Artist
