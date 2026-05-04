@@ -21,6 +21,15 @@ enum RemoteETag {
         return "\"v" + hex.prefix(16) + "\""
     }
 
+    /// Build an artwork ETag from track id + first 8 hex chars of the
+    /// blob's SHA-256. Including the content fingerprint guarantees a
+    /// fresh tag when the track's artwork is rewritten or replaced.
+    static func artworkETag(trackId: Int64, bytes: Data) -> String {
+        let digest = SHA256.hash(data: bytes)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "\"track-\(trackId)-" + hex.prefix(8) + "\""
+    }
+
     /// JSON encoder configured for deterministic byte output across calls
     /// with equal state. Sorted keys are required so two equivalent states
     /// hash to the same ETag.

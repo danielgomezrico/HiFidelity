@@ -263,8 +263,9 @@ final class RemoteControlServer: ObservableObject {
             return HTTPResponse(statusCode: .ok, headers: headers, body: data)
         }
 
-        // GET /artwork/:trackId — raw bytes; content-addressable so any
-        // matching ETag short-circuits to 304 without touching the DB.
+        // GET /artwork/:trackId — raw bytes; ETag derives from id PLUS a
+        // short content fingerprint so deleted/replaced artwork yields a
+        // fresh tag and never serves a 304 for a missing track.
         await server.appendRoute("GET /artwork/:trackId") { request in
             guard let raw = request.routeParameters["trackId"],
                   let trackId = Int64(raw) else {
@@ -275,14 +276,18 @@ final class RemoteControlServer: ObservableObject {
                     body: Data(#"{"error":"invalid trackId"}"#.utf8)
                 )
             }
-            let tag = "\"track-\(trackId)\""
-            if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
-                let headers: HTTPHeaders = [.eTag: tag, HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"]
-                return HTTPResponse(statusCode: .notModified, headers: headers)
-            }
             do {
+                // Existence check first — return 404 before any ETag work.
                 guard let result = try RemoteArtworkLoader.data(forTrackId: trackId) else {
                     return HTTPResponse(statusCode: .notFound)
+                }
+                let tag = RemoteETag.artworkETag(trackId: trackId, bytes: result.data)
+                if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
+                    let headers: HTTPHeaders = [
+                        .eTag: tag,
+                        HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"
+                    ]
+                    return HTTPResponse(statusCode: .notModified, headers: headers)
                 }
                 let headers: HTTPHeaders = [
                     .contentType: result.contentType,
