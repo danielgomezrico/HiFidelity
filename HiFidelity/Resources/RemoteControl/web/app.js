@@ -120,6 +120,9 @@
       if (json) render(json);
       schedulePoll(POLL_MS);
     }).catch(function (err) {
+      // B011: invalidate ETag so the next successful poll receives a full
+      // 200 response instead of a 304 against a stale cached state.
+      lastEtag = null;
       setConn("error", "Offline");
       schedulePoll(BACKOFF_MS);
     });
