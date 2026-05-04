@@ -112,6 +112,7 @@ final class RemoteControlServer: ObservableObject {
     /// Register routes on the supplied `HTTPServer` instance.
     private func registerRoutes(on server: HTTPServer) async {
         await registerStateRoutes(on: server)
+        await registerCommandRoutes(on: server)
     }
 
     /// M2 read-only routes: `/state` (current playback snapshot, ETag-keyed)
