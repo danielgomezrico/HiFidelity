@@ -22,7 +22,38 @@ enum RemoteStateProvider {
         case .all: mode = "all"
         case .one: mode = "one"
         }
-        let queueDTO = pc.queue.compactMap { RemoteTrack($0) }
+        // B003: the wire `queue` is `compactMap`-filtered (drops tracks with
+        // no `trackId`), but `currentQueueIndex` indexes the unfiltered
+        // queue. Build a side-table mapping original -> filtered index so
+        // the wire pair always describes the same array.
+        let unfiltered = pc.queue
+        var filtered: [RemoteTrack] = []
+        filtered.reserveCapacity(unfiltered.count)
+        var originalToFiltered: [Int] = Array(repeating: -1, count: unfiltered.count)
+        for (i, track) in unfiltered.enumerated() {
+            if let dto = RemoteTrack(track) {
+                originalToFiltered[i] = filtered.count
+                filtered.append(dto)
+            }
+        }
+        let originalIndex = pc.currentQueueIndex
+        let mappedIndex: Int
+        if filtered.isEmpty {
+            mappedIndex = -1
+        } else if originalIndex < 0 || originalIndex >= unfiltered.count {
+            mappedIndex = -1
+        } else if originalToFiltered[originalIndex] != -1 {
+            mappedIndex = originalToFiltered[originalIndex]
+        } else {
+            // Original slot was dropped: clamp to next surviving slot, or -1
+            // if none survive after it.
+            var fallback = -1
+            for j in (originalIndex + 1)..<unfiltered.count where originalToFiltered[j] != -1 {
+                fallback = originalToFiltered[j]
+                break
+            }
+            mappedIndex = fallback
+        }
         let currentDTO = pc.currentTrack.flatMap { RemoteTrack($0) }
         let streamDTO = pc.currentStreamInfo.map { RemoteStreamInfo($0) }
         return RemoteState(
@@ -35,8 +66,8 @@ enum RemoteStateProvider {
             repeatMode: mode,
             isShuffleEnabled: pc.isShuffleEnabled,
             currentTrack: currentDTO,
-            queue: queueDTO,
-            currentQueueIndex: pc.currentQueueIndex,
+            queue: filtered,
+            currentQueueIndex: mappedIndex,
             stream: streamDTO
         )
     }
