@@ -232,6 +232,7 @@ final class RemoteControlServer: ObservableObject {
     }
 
     /// Static-file routes serving the bundled HTML/CSS/JS web client.
+    /// HEAD mirrors GET (RFC 9110): same headers, empty body.
     private func registerWebUIRoutes(on server: HTTPServer) async {
         let webSubdir = "RemoteControl/web"
         let indexHandler = BundleHTTPHandler(
@@ -241,27 +242,44 @@ final class RemoteControlServer: ObservableObject {
             contentType: "text/html; charset=utf-8",
             cacheControl: "no-cache"
         )
-        await server.appendRoute("GET /", to: indexHandler)
-        await server.appendRoute("GET /index.html", to: indexHandler)
-        await server.appendRoute("GET /assets/app.js", to: BundleHTTPHandler(
+        let appJsHandler = BundleHTTPHandler(
             resourceName: "app",
             resourceExtension: "js",
             subdirectory: webSubdir,
             contentType: "application/javascript; charset=utf-8"
-        ))
-        await server.appendRoute("GET /assets/style.css", to: BundleHTTPHandler(
+        )
+        let styleCssHandler = BundleHTTPHandler(
             resourceName: "style",
             resourceExtension: "css",
             subdirectory: webSubdir,
             contentType: "text/css; charset=utf-8"
-        ))
+        )
+        await server.appendRoute("GET /", to: indexHandler)
+        await server.appendRoute("GET /index.html", to: indexHandler)
+        await server.appendRoute("GET /assets/app.js", to: appJsHandler)
+        await server.appendRoute("GET /assets/style.css", to: styleCssHandler)
+
+        // HEAD: rerun the GET path but drop the body. (B006)
+        await server.appendRoute("HEAD /") { request in
+            await stripBody(try await indexHandler.handleRequest(request))
+        }
+        await server.appendRoute("HEAD /index.html") { request in
+            await stripBody(try await indexHandler.handleRequest(request))
+        }
+        await server.appendRoute("HEAD /assets/app.js") { request in
+            await stripBody(try await appJsHandler.handleRequest(request))
+        }
+        await server.appendRoute("HEAD /assets/style.css") { request in
+            await stripBody(try await styleCssHandler.handleRequest(request))
+        }
     }
 
     /// M2 read-only routes: `/state` (current playback snapshot, ETag-keyed)
     /// and `/artwork/:trackId` (raw image bytes, content-addressable).
+    /// HEAD mirrors GET (RFC 9110): same headers, empty body.
     private func registerStateRoutes(on server: HTTPServer) async {
         // GET /state — JSON snapshot of PlaybackController, hash-derived ETag.
-        await server.appendRoute("GET /state") { request in
+        let stateHandler: @Sendable (HTTPRequest) async throws -> HTTPResponse = { request in
             let state = await MainActor.run { RemoteStateProvider.snapshot() }
             let data: Data
             do {
@@ -282,19 +300,18 @@ final class RemoteControlServer: ObservableObject {
             ]
             return HTTPResponse(statusCode: .ok, headers: headers, body: data)
         }
+        await server.appendRoute("GET /state", handler: stateHandler)
+        await server.appendRoute("HEAD /state") { request in
+            await stripBody(try await stateHandler(request))
+        }
 
         // GET /artwork/:trackId — raw bytes; ETag derives from id PLUS a
         // short content fingerprint so deleted/replaced artwork yields a
         // fresh tag and never serves a 304 for a missing track.
-        await server.appendRoute("GET /artwork/:trackId") { request in
+        let artworkHandler: @Sendable (HTTPRequest) async throws -> HTTPResponse = { request in
             guard let raw = request.routeParameters["trackId"],
                   let trackId = Int64(raw) else {
-                let headers: HTTPHeaders = [.contentType: "application/json; charset=utf-8"]
-                return HTTPResponse(
-                    statusCode: .badRequest,
-                    headers: headers,
-                    body: Data(#"{"error":"invalid trackId"}"#.utf8)
-                )
+                return RemoteResponse.badRequest("invalid trackId")
             }
             do {
                 // Existence check first — return 404 before any ETag work.
@@ -320,5 +337,16 @@ final class RemoteControlServer: ObservableObject {
                 return HTTPResponse(statusCode: .internalServerError)
             }
         }
+        await server.appendRoute("GET /artwork/:trackId", handler: artworkHandler)
+        await server.appendRoute("HEAD /artwork/:trackId") { request in
+            await stripBody(try await artworkHandler(request))
+        }
     }
+}
+
+/// Drop the body from an HTTPResponse, preserving status code and headers.
+/// Used for HEAD handlers that mirror GET. (B006)
+@Sendable
+func stripBody(_ response: HTTPResponse) async -> HTTPResponse {
+    HTTPResponse(statusCode: response.statusCode, headers: response.headers, body: Data())
 }
