@@ -308,6 +308,12 @@
     });
   }
 
+  // B012: hard-cap entity track fetches at 200 rows to avoid O(N) DOM
+  // construction and a thundering herd of /artwork/<id> requests on
+  // 1000-track albums or smart playlists. Server enforcement is out of
+  // scope for v1; this is the client-side guard.
+  var ENTITY_TRACKS_LIMIT = 200;
+
   function loadEntityTracks(top) {
     setListSpinner();
     var path;
@@ -315,6 +321,7 @@
     else if (top.kind === "artist") path = "/artists/" + top.id + "/tracks";
     else if (top.kind === "playlist") path = "/playlists/" + top.id + "/tracks";
     else { setListEmpty(""); return; }
+    path += "?limit=" + ENTITY_TRACKS_LIMIT;
 
     fetch(path, { cache: "no-store" }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
