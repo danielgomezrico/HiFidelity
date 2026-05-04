@@ -71,10 +71,15 @@ if [ -n "$TRACK_ID" ]; then
         [ "$SIZE" -gt 0 ] || red "/artwork/$TRACK_ID returned zero bytes"
         green "/artwork/$TRACK_ID 200, $SIZE bytes, Cache-Control: $CC"
 
-        # If-None-Match → 304
-        HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: \"track-$TRACK_ID\"" "$BASE/artwork/$TRACK_ID")
-        [ "$HTTP_CODE" = "304" ] || red "/artwork/$TRACK_ID If-None-Match expected 304, got $HTTP_CODE"
-        green "/artwork/$TRACK_ID If-None-Match → 304"
+        # If-None-Match → 304 (capture ETag from prior GET; B001 changed format to "track-<id>-<sha8>")
+        ART_ETAG=$(grep -i '^etag:' "$ART_HEADERS" | tr -d '\r' | sed -E 's/^[Ee][Tt][Aa][Gg]: //')
+        if [ -n "$ART_ETAG" ]; then
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $ART_ETAG" "$BASE/artwork/$TRACK_ID")
+            [ "$HTTP_CODE" = "304" ] || red "/artwork/$TRACK_ID If-None-Match expected 304, got $HTTP_CODE"
+            green "/artwork/$TRACK_ID If-None-Match → 304"
+        else
+            red "/artwork/$TRACK_ID missing ETag header (cannot verify 304 path)"
+        fi
     elif [ "$HTTP_CODE" = "404" ]; then
         green "/artwork/$TRACK_ID 404 (no embedded artwork — acceptable)"
     else

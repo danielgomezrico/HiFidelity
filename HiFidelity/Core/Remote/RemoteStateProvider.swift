@@ -58,7 +58,8 @@ enum RemoteStateProvider {
         let streamDTO = pc.currentStreamInfo.map { RemoteStreamInfo($0) }
         // B008: mirror the write-side clamp so the wire never leaks an
         // out-of-range value (NaN client-side falls back only on null).
-        let clampedVolume = max(0.0, min(1.0, pc.volume))
+        let rawVolume = pc.volume
+        let clampedVolume = rawVolume.isNaN ? 0.7 : max(0.0, min(1.0, rawVolume))
         return RemoteState(
             isPlaying: pc.isPlaying,
             currentTime: pc.currentTime,
