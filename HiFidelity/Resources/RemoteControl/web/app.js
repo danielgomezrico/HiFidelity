@@ -180,5 +180,243 @@
     if (document.visibilityState === "visible") schedulePoll(0);
   });
 
+  // ---------- Browse drawer (M7b) ----------
+  var drawerEls = {
+    drawer: document.getElementById("drawer"),
+    open: document.getElementById("btn-browse"),
+    close: document.getElementById("drawer-close"),
+    back: document.getElementById("drawer-back"),
+    title: document.getElementById("drawer-title"),
+    list: document.getElementById("drawer-list"),
+    search: document.getElementById("search"),
+    tabs: Array.prototype.slice.call(document.querySelectorAll(".tab")),
+  };
+
+  // Stack of views: {kind:"list", tab:"tracks|albums|artists|playlists", q:""}
+  // or {kind:"album", id, name, sub}
+  // or {kind:"artist", id, name, sub}
+  // or {kind:"playlist", id, name, sub}
+  var navStack = [];
+  var searchDebounce = null;
+
+  function fmtSeconds(secs) {
+    return fmtTime(secs || 0);
+  }
+
+  function showDrawer() {
+    drawerEls.drawer.hidden = false;
+    if (navStack.length === 0) navStack.push({ kind: "list", tab: "tracks", q: "" });
+    renderCurrent();
+  }
+  function hideDrawer() {
+    drawerEls.drawer.hidden = true;
+  }
+  function popOrClose() {
+    if (navStack.length > 1) {
+      navStack.pop();
+      renderCurrent();
+    } else {
+      hideDrawer();
+    }
+  }
+
+  function setActiveTab(tab) {
+    drawerEls.tabs.forEach(function (b) {
+      b.setAttribute("aria-selected", b.dataset.tab === tab ? "true" : "false");
+    });
+  }
+
+  function renderCurrent() {
+    var top = navStack[navStack.length - 1];
+    if (!top) { hideDrawer(); return; }
+    if (top.kind === "list") {
+      drawerEls.title.textContent = "Library";
+      setActiveTab(top.tab);
+      drawerEls.search.value = top.q || "";
+      drawerEls.search.disabled = (top.tab === "playlists");
+      drawerEls.search.placeholder = top.tab === "playlists" ? "" : "Search " + top.tab + "…";
+      loadList(top);
+    } else {
+      drawerEls.title.textContent = top.name || "Tracks";
+      drawerEls.tabs.forEach(function (b) { b.setAttribute("aria-selected", "false"); });
+      drawerEls.search.value = "";
+      drawerEls.search.disabled = true;
+      drawerEls.search.placeholder = "";
+      loadEntityTracks(top);
+    }
+  }
+
+  function setListEmpty(text) {
+    drawerEls.list.innerHTML = '<div class="list-empty">' + text + "</div>";
+  }
+
+  function setListSpinner() {
+    setListEmpty("Loading…");
+  }
+
+  function listURL(top) {
+    var qs = [];
+    qs.push("limit=200");
+    if (top.q) qs.push("q=" + encodeURIComponent(top.q));
+    var path = "/" + top.tab;
+    return path + "?" + qs.join("&");
+  }
+
+  function loadList(top) {
+    setListSpinner();
+    fetch(listURL(top), { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (data) {
+      if (top.tab === "tracks") {
+        renderTracks(data.tracks || []);
+      } else if (top.tab === "albums") {
+        renderAlbums(data || []);
+      } else if (top.tab === "artists") {
+        renderArtists(data || []);
+      } else if (top.tab === "playlists") {
+        renderPlaylists(data || []);
+      }
+    }).catch(function () {
+      setListEmpty("Couldn't load.");
+    });
+  }
+
+  function loadEntityTracks(top) {
+    setListSpinner();
+    var path;
+    if (top.kind === "album") path = "/albums/" + top.id + "/tracks";
+    else if (top.kind === "artist") path = "/artists/" + top.id + "/tracks";
+    else if (top.kind === "playlist") path = "/playlists/" + top.id + "/tracks";
+    else { setListEmpty(""); return; }
+
+    fetch(path, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (tracks) {
+      renderTracks(tracks || []);
+    }).catch(function () {
+      setListEmpty("Couldn't load.");
+    });
+  }
+
+  function renderTracks(tracks) {
+    if (!tracks.length) { setListEmpty("No tracks."); return; }
+    var ids = tracks.map(function (t) { return t.trackId; });
+    var frag = document.createDocumentFragment();
+    tracks.forEach(function (t, idx) {
+      var row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML =
+        '<div class="row-thumb" style="background-image:url(/artwork/' + t.trackId + ');"></div>' +
+        '<div class="row-text">' +
+          '<div class="row-title"></div>' +
+          '<div class="row-sub"></div>' +
+        '</div>' +
+        '<div class="row-meta"></div>';
+      row.querySelector(".row-title").textContent = t.title || "Unknown";
+      row.querySelector(".row-sub").textContent = (t.artist || "") + (t.album ? " · " + t.album : "");
+      row.querySelector(".row-meta").textContent = fmtSeconds(t.duration);
+      row.addEventListener("click", function () {
+        postCmd("/queue/playTracks", { trackIds: ids, startAt: idx });
+        hideDrawer();
+      });
+      frag.appendChild(row);
+    });
+    drawerEls.list.replaceChildren(frag);
+  }
+
+  function renderAlbums(albums) {
+    if (!albums.length) { setListEmpty("No albums."); return; }
+    var frag = document.createDocumentFragment();
+    albums.forEach(function (a) {
+      var row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML =
+        '<div class="row-thumb"></div>' +
+        '<div class="row-text">' +
+          '<div class="row-title"></div>' +
+          '<div class="row-sub"></div>' +
+        '</div>' +
+        '<div class="row-meta"></div>';
+      row.querySelector(".row-title").textContent = a.title || "Unknown Album";
+      row.querySelector(".row-sub").textContent = (a.albumArtist || "Various Artists") + (a.year ? " · " + a.year : "");
+      row.querySelector(".row-meta").textContent = a.trackCount + (a.trackCount === 1 ? " track" : " tracks");
+      row.addEventListener("click", function () {
+        navStack.push({ kind: "album", id: a.id, name: a.title || "Album" });
+        renderCurrent();
+      });
+      frag.appendChild(row);
+    });
+    drawerEls.list.replaceChildren(frag);
+  }
+
+  function renderArtists(artists) {
+    if (!artists.length) { setListEmpty("No artists."); return; }
+    var frag = document.createDocumentFragment();
+    artists.forEach(function (a) {
+      var row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML =
+        '<div class="row-text">' +
+          '<div class="row-title"></div>' +
+          '<div class="row-sub"></div>' +
+        '</div>' +
+        '<div class="row-meta"></div>';
+      row.querySelector(".row-title").textContent = a.name || "Unknown Artist";
+      row.querySelector(".row-sub").textContent = a.albumCount + (a.albumCount === 1 ? " album" : " albums");
+      row.querySelector(".row-meta").textContent = a.trackCount + (a.trackCount === 1 ? " track" : " tracks");
+      row.addEventListener("click", function () {
+        navStack.push({ kind: "artist", id: a.id, name: a.name || "Artist" });
+        renderCurrent();
+      });
+      frag.appendChild(row);
+    });
+    drawerEls.list.replaceChildren(frag);
+  }
+
+  function renderPlaylists(lists) {
+    if (!lists.length) { setListEmpty("No playlists."); return; }
+    var frag = document.createDocumentFragment();
+    lists.forEach(function (p) {
+      var row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML =
+        '<div class="row-text">' +
+          '<div class="row-title"></div>' +
+          '<div class="row-sub"></div>' +
+        '</div>' +
+        '<div class="row-meta"></div>';
+      row.querySelector(".row-title").textContent = p.name || "Playlist";
+      row.querySelector(".row-sub").textContent = p.isSmart ? "Smart playlist" : (p.description || "");
+      row.querySelector(".row-meta").textContent = p.trackCount + (p.trackCount === 1 ? " track" : " tracks");
+      row.addEventListener("click", function () {
+        navStack.push({ kind: "playlist", id: p.id, name: p.name || "Playlist" });
+        renderCurrent();
+      });
+      frag.appendChild(row);
+    });
+    drawerEls.list.replaceChildren(frag);
+  }
+
+  drawerEls.open.addEventListener("click", showDrawer);
+  drawerEls.close.addEventListener("click", hideDrawer);
+  drawerEls.back.addEventListener("click", popOrClose);
+  drawerEls.tabs.forEach(function (b) {
+    b.addEventListener("click", function () {
+      navStack = [{ kind: "list", tab: b.dataset.tab, q: "" }];
+      renderCurrent();
+    });
+  });
+  drawerEls.search.addEventListener("input", function (e) {
+    var top = navStack[navStack.length - 1];
+    if (!top || top.kind !== "list") return;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(function () {
+      top.q = e.target.value.trim();
+      loadList(top);
+    }, 220);
+  });
+
   pollState();
 })();

@@ -180,3 +180,114 @@ input[type="range"]::-moz-range-thumb {
   .btn { font-size: 20px; }
   .btn-play { font-size: 24px; width: 56px; height: 56px; }
 }
+
+/* ---------- Browse drawer ---------- */
+.drawer {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.drawer[hidden] { display: none; }
+.drawer-hdr {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-title {
+  text-align: center;
+  font-weight: 600;
+  font-size: 16px;
+}
+.drawer-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 10px 16px;
+  border-radius: 999px;
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab[aria-selected="true"] {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+.drawer-search {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+#search {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font: inherit;
+  min-height: 40px;
+}
+.drawer-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  min-height: var(--tap);
+}
+.row:active { background: var(--bg-elev); }
+.row-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  background: var(--bg-elev);
+  flex: 0 0 auto;
+  background-size: cover;
+  background-position: center;
+}
+.row-text { flex: 1; min-width: 0; }
+.row-title {
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-sub {
+  font-size: 13px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-meta {
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.list-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--fg-muted);
+}
