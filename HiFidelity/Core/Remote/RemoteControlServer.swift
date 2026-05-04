@@ -51,7 +51,7 @@ final class RemoteControlServer: ObservableObject {
         let resolvedName = RemoteSettings.bonjourName
 
         let httpServer = HTTPServer(port: resolvedPort)
-        registerRoutes(on: httpServer)
+        await registerRoutes(on: httpServer)
 
         // FlyingFox's `run()` blocks for the lifetime of the server; we
         // launch it on a detached Task so callers return as soon as the
@@ -107,12 +107,79 @@ final class RemoteControlServer: ObservableObject {
         try await start()
     }
 
-    // MARK: - Routes (populated by later milestones)
+    // MARK: - Routes
 
-    /// Register routes on the supplied `HTTPServer` instance. M1 adds none;
-    /// later milestones extend this method.
-    private func registerRoutes(on server: HTTPServer) {
-        // Routes are appended in M2+. Intentionally empty for the M1 skeleton.
-        _ = server
+    /// Register routes on the supplied `HTTPServer` instance.
+    private func registerRoutes(on server: HTTPServer) async {
+        await registerStateRoutes(on: server)
+    }
+
+    /// M2 read-only routes: `/state` (current playback snapshot, ETag-keyed)
+    /// and `/artwork/:trackId` (raw image bytes, content-addressable).
+    private func registerStateRoutes(on server: HTTPServer) async {
+        // GET /state — JSON snapshot of PlaybackController, hash-derived ETag.
+        await server.appendRoute("GET /state") { request in
+            let state = await MainActor.run { RemoteStateProvider.snapshot() }
+            let data: Data
+            do {
+                data = try RemoteETag.canonicalJSONEncoder.encode(state)
+            } catch {
+                Logger.error("RemoteControlServer /state encode failed: \(error)")
+                return HTTPResponse(statusCode: .internalServerError)
+            }
+            let tag = RemoteETag.etag(forJSON: data)
+            if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
+                return HTTPResponse(
+                    statusCode: .notModified,
+                    headers: [.eTag: tag, HTTPHeader("Cache-Control"): "no-store"]
+                )
+            }
+            return HTTPResponse(
+                statusCode: .ok,
+                headers: [
+                    .contentType: "application/json; charset=utf-8",
+                    .eTag: tag,
+                    HTTPHeader("Cache-Control"): "no-store"
+                ],
+                body: data
+            )
+        }
+
+        // GET /artwork/:trackId — raw bytes; content-addressable so any
+        // matching ETag short-circuits to 304 without touching the DB.
+        await server.appendRoute("GET /artwork/:trackId") { request in
+            guard let raw = request.routeParameters["trackId"],
+                  let trackId = Int64(raw) else {
+                return HTTPResponse(
+                    statusCode: .badRequest,
+                    headers: [.contentType: "application/json; charset=utf-8"],
+                    body: Data(#"{"error":"invalid trackId"}"#.utf8)
+                )
+            }
+            let tag = "\"track-\(trackId)\""
+            if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
+                return HTTPResponse(
+                    statusCode: .notModified,
+                    headers: [.eTag: tag, HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"]
+                )
+            }
+            do {
+                guard let result = try RemoteArtworkLoader.data(forTrackId: trackId) else {
+                    return HTTPResponse(statusCode: .notFound)
+                }
+                return HTTPResponse(
+                    statusCode: .ok,
+                    headers: [
+                        .contentType: result.contentType,
+                        .eTag: tag,
+                        HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"
+                    ],
+                    body: result.data
+                )
+            } catch {
+                Logger.error("RemoteControlServer /artwork/\(trackId) DB read failed: \(error)")
+                return HTTPResponse(statusCode: .internalServerError)
+            }
+        }
     }
 }
