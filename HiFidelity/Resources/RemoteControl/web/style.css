@@ -1,0 +1,182 @@
+/* HiFidelity Remote — vanilla CSS, no build step. */
+
+:root {
+  --bg: #fafafa;
+  --bg-elev: #ffffff;
+  --fg: #0e1116;
+  --fg-muted: #5b6573;
+  --accent: #ff5252;
+  --accent-fg: #ffffff;
+  --border: rgba(0, 0, 0, 0.08);
+  --shadow: 0 4px 18px rgba(0, 0, 0, 0.07);
+  --tap: 44px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116;
+    --bg-elev: #181c23;
+    --fg: #f5f7fa;
+    --fg-muted: #9aa3b1;
+    --accent: #ff6b6b;
+    --accent-fg: #0e1116;
+    --border: rgba(255, 255, 255, 0.08);
+    --shadow: 0 6px 22px rgba(0, 0, 0, 0.6);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.screen {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px env(safe-area-inset-right, 16px) calc(16px + env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 16px);
+  min-height: 100vh;
+}
+
+.hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px;
+}
+.hdr-title { font-weight: 600; letter-spacing: 0.02em; font-size: 14px; opacity: 0.7; }
+.conn-status { font-size: 12px; color: var(--fg-muted); }
+.conn-status[data-state="ok"] { color: var(--fg-muted); }
+.conn-status[data-state="error"] { color: var(--accent); }
+
+.art-wrap {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  display: flex; align-items: center; justify-content: center;
+}
+.artwork {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.art-fallback {
+  font-size: 96px;
+  color: var(--fg-muted);
+  opacity: 0.4;
+}
+
+.meta { text-align: center; padding: 0 8px; }
+.title { font-size: 22px; font-weight: 700; line-height: 1.25; word-break: break-word; }
+.artist { font-size: 16px; color: var(--fg); margin-top: 4px; word-break: break-word; }
+.album { font-size: 13px; color: var(--fg-muted); margin-top: 4px; word-break: break-word; }
+
+.seek { padding: 0 4px; }
+.seek-slider { width: 100%; }
+.seek-times {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.transport {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 22px;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+.btn:active { transform: scale(0.94); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn[aria-pressed="true"] { color: var(--accent); }
+
+.btn-play {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 28px;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto;
+}
+
+.extras {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+.vol { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vol-slider { flex: 1; min-width: 0; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: var(--tap);
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  margin-top: -7px;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 50%;
+  border: 0;
+}
+
+@media (max-width: 360px) {
+  .title { font-size: 19px; }
+  .btn { font-size: 20px; }
+  .btn-play { font-size: 24px; width: 56px; height: 56px; }
+}

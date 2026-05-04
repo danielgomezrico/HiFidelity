@@ -208,6 +208,33 @@ final class RemoteControlServer: ObservableObject {
         await registerStateRoutes(on: server)
         await registerCommandRoutes(on: server)
         await registerBrowseRoutes(on: server)
+        await registerWebUIRoutes(on: server)
+    }
+
+    /// Static-file routes serving the bundled HTML/CSS/JS web client.
+    private func registerWebUIRoutes(on server: HTTPServer) async {
+        let webSubdir = "RemoteControl/web"
+        let indexHandler = BundleHTTPHandler(
+            resourceName: "index",
+            resourceExtension: "html",
+            subdirectory: webSubdir,
+            contentType: "text/html; charset=utf-8",
+            cacheControl: "no-cache"
+        )
+        await server.appendRoute("GET /", to: indexHandler)
+        await server.appendRoute("GET /index.html", to: indexHandler)
+        await server.appendRoute("GET /assets/app.js", to: BundleHTTPHandler(
+            resourceName: "app",
+            resourceExtension: "js",
+            subdirectory: webSubdir,
+            contentType: "application/javascript; charset=utf-8"
+        ))
+        await server.appendRoute("GET /assets/style.css", to: BundleHTTPHandler(
+            resourceName: "style",
+            resourceExtension: "css",
+            subdirectory: webSubdir,
+            contentType: "text/css; charset=utf-8"
+        ))
     }
 
     /// M2 read-only routes: `/state` (current playback snapshot, ETag-keyed)
