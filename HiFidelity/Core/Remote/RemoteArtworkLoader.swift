@@ -44,13 +44,15 @@ enum RemoteArtworkLoader {
                    arguments: [albumId]
                ),
                let albumArtwork = albumRow["artwork_data"] as Data?,
-               !albumArtwork.isEmpty {
-                return ArtworkBytes(data: albumArtwork, contentType: sniffContentType(albumArtwork))
+               !albumArtwork.isEmpty,
+               let mime = sniffContentType(albumArtwork) {
+                return ArtworkBytes(data: albumArtwork, contentType: mime)
             }
 
             // 3. Fall back to the track's own bytes.
-            if let trackArtwork, !trackArtwork.isEmpty {
-                return ArtworkBytes(data: trackArtwork, contentType: sniffContentType(trackArtwork))
+            if let trackArtwork, !trackArtwork.isEmpty,
+               let mime = sniffContentType(trackArtwork) {
+                return ArtworkBytes(data: trackArtwork, contentType: mime)
             }
 
             return nil
@@ -59,8 +61,10 @@ enum RemoteArtworkLoader {
 
     /// Identify the image format from the first bytes. Mime is not stored
     /// in the database; embedded art arrives as raw bytes from TagLib.
-    private static func sniffContentType(_ data: Data) -> String {
-        guard data.count >= 4 else { return "application/octet-stream" }
+    /// Returns `nil` for unrecognized formats (HEIC, etc.) so the caller
+    /// can 404 — browsers refuse to render `application/octet-stream`.
+    private static func sniffContentType(_ data: Data) -> String? {
+        guard data.count >= 4 else { return nil }
         let b0 = data[data.startIndex]
         let b1 = data[data.startIndex + 1]
         let b2 = data[data.startIndex + 2]
@@ -73,6 +77,6 @@ enum RemoteArtworkLoader {
         if b0 == 0x47, b1 == 0x49, b2 == 0x46, b3 == 0x38 { return "image/gif" }
         // WEBP: 52 49 46 46 ... 57 45 42 50 — only check the RIFF prefix.
         if b0 == 0x52, b1 == 0x49, b2 == 0x46, b3 == 0x46 { return "image/webp" }
-        return "application/octet-stream"
+        return nil
     }
 }
