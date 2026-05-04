@@ -134,7 +134,9 @@ html, body {
 
 .extras {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* B010: three children (#btn-fav, #btn-browse, .vol) need three columns —
+     two auto-sized buttons on the left and the volume slider stretching. */
+  grid-template-columns: auto auto 1fr;
   align-items: center;
   gap: 12px;
   padding: 4px 0;
