@@ -26,14 +26,6 @@ final class RemoteControlServer: ObservableObject {
     @Published private(set) var primaryURL: URL?
     @Published private(set) var allURLs: [URL] = []
 
-    /// Lock-free snapshot of allowed Origin hosts for the same-origin
-    /// guard (B002). Updated whenever `allURLs` / `bonjourName` change.
-    /// Read off-main from FlyingFox handlers — never mutated outside
-    /// `@MainActor`. `nonisolated(unsafe)` is acceptable: writes happen
-    /// on `@MainActor`, reads are best-effort and a stale snapshot only
-    /// admits a brief allow/deny mismatch right after a settings change.
-    nonisolated(unsafe) static var knownAllowedOriginHosts: [String] = ["127.0.0.1", "localhost"]
-
     // MARK: - Private
 
     private var server: HTTPServer?
@@ -200,18 +192,6 @@ final class RemoteControlServer: ObservableObject {
         } else {
             self.primaryURL = urls.first
         }
-
-        // Refresh the same-origin guard snapshot (B002).
-        var hosts: [String] = ["127.0.0.1", "localhost", "::1"]
-        for url in urls {
-            if let h = url.host, !hosts.contains(where: { $0.caseInsensitiveCompare(h) == .orderedSame }) {
-                hosts.append(h)
-            }
-        }
-        if !bonjourName.isEmpty {
-            hosts.append("\(bonjourName).local")
-        }
-        Self.knownAllowedOriginHosts = hosts
     }
 
     /// Convenience: stop then start. Used by Settings when the user edits

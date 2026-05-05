@@ -196,32 +196,35 @@ enum RemoteResponse {
 }
 
 /// Same-origin guard for write endpoints (v1 hardening only — no token,
-/// no pairing). Allows: absent Origin (curl/native clients), Origin whose
-/// host matches the request `Host` header, or Origin whose host matches
-/// any URL the server is bound to.
+/// no pairing). The browser always sends Origin matching the page it
+/// loaded, and the page was loaded from this same server, so its host
+/// must equal the request's Host header. That's the entire check.
 ///
-/// Returns `true` when the request should be allowed. Mutating handlers
-/// call this and return `RemoteResponse.forbidden(...)` on `false`.
+/// Allows: absent Origin (curl / native clients) or Origin host:port
+/// case-insensitively equal to the request Host header. Anything else
+/// is rejected — handlers return `RemoteResponse.forbidden(...)`.
 @Sendable
 func isRemoteOriginAllowed(_ request: HTTPRequest) -> Bool {
     let originValue = request.headers[HTTPHeader("Origin")]
-    // Absent Origin = native client / curl — allowed.
     guard let originValue, !originValue.isEmpty else { return true }
-    guard let originHost = URL(string: originValue)?.host else {
-        // Malformed Origin — reject.
+    guard let originURL = URL(string: originValue), let originHost = originURL.host else {
         return false
     }
-    // Match against the request's Host header (host portion only).
-    if let hostHeader = request.headers[HTTPHeader("Host")] {
-        let hostOnly = hostHeader.split(separator: ":").first.map(String.init) ?? hostHeader
-        if hostOnly.caseInsensitiveCompare(originHost) == .orderedSame {
-            return true
-        }
+    guard let hostHeader = request.headers[HTTPHeader("Host")], !hostHeader.isEmpty else {
+        return false
     }
-    // Match against any of the server's known bound URLs.
-    let knownHosts = RemoteControlServer.knownAllowedOriginHosts
-    for host in knownHosts where host.caseInsensitiveCompare(originHost) == .orderedSame {
-        return true
+    // Compare host:port. Origin's port is implicit (80 for http, 443 for
+    // https) when omitted; Host always omits 80/443. Build canonical
+    // "host:port" forms on both sides.
+    let originPort = originURL.port ?? (originURL.scheme == "https" ? 443 : 80)
+    let originCanonical = "\(originHost):\(originPort)".lowercased()
+
+    let hostCanonical: String
+    if hostHeader.contains(":") {
+        hostCanonical = hostHeader.lowercased()
+    } else {
+        // Bare host = default port. We're plain HTTP, so 80.
+        hostCanonical = "\(hostHeader):80".lowercased()
     }
-    return false
+    return originCanonical == hostCanonical
 }
