@@ -1,5 +1,5 @@
 //
-//  BundleHTTPHandler.swift
+//  RemoteBundleHTTPHandler.swift
 //  HiFidelity
 //
 //  Static-file HTTP handler that reads a single file from `Bundle.main`.
@@ -10,7 +10,7 @@
 import Foundation
 import FlyingFox
 
-struct BundleHTTPHandler: HTTPHandler {
+struct RemoteBundleHTTPHandler: HTTPHandler {
     let resourceName: String
     let resourceExtension: String
     let subdirectory: String
@@ -44,7 +44,7 @@ struct BundleHTTPHandler: HTTPHandler {
             withExtension: resourceExtension
         )
         guard let url else {
-            Logger.error("BundleHTTPHandler: missing \(subdirectory)/\(resourceName).\(resourceExtension)")
+            Logger.error("RemoteBundleHTTPHandler: missing \(subdirectory)/\(resourceName).\(resourceExtension)")
             return RemoteResponse.notFound("not found")
         }
         do {
@@ -55,7 +55,7 @@ struct BundleHTTPHandler: HTTPHandler {
             ]
             return HTTPResponse(statusCode: .ok, headers: headers, body: data)
         } catch {
-            Logger.error("BundleHTTPHandler: read failed for \(url.lastPathComponent): \(error)")
+            Logger.error("RemoteBundleHTTPHandler: read failed for \(url.lastPathComponent): \(error)")
             return RemoteResponse.serverError("read failed")
         }
     }

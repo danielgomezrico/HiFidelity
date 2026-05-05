@@ -11,6 +11,42 @@
 import Foundation
 import FlyingFox
 
+// MARK: - Request DTOs
+
+/// Strict-typed `Decodable` request bodies for the HTTP command routes.
+/// Decoding failures cause handlers to return 400 Bad Request — never
+/// silently fall back to defaults.
+
+struct SeekRequest: Decodable {
+    let seconds: Double
+}
+
+struct SeekRelativeRequest: Decodable {
+    let delta: Double
+}
+
+struct VolumeRequest: Decodable {
+    let volume: Double
+}
+
+struct IndexRequest: Decodable {
+    let index: Int
+}
+
+struct MoveRequest: Decodable {
+    let from: Int
+    let to: Int
+}
+
+struct TrackIdsRequest: Decodable {
+    let trackIds: [Int64]
+}
+
+struct PlayTracksRequest: Decodable {
+    let trackIds: [Int64]
+    let startAt: Int
+}
+
 extension RemoteControlServer {
     /// Register the M3 command (POST) routes on the supplied server.
     /// Call from `registerRoutes(on:)`.
@@ -45,9 +81,10 @@ extension RemoteControlServer {
         // ---- Seeking ----
         await server.appendRoute("POST /seek") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(SeekRequest.self, from: body) else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: SeekRequest
+            switch await decodeBody(SeekRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
             let pre = max(0.0, req.seconds)
             await MainActor.run {
@@ -58,9 +95,10 @@ extension RemoteControlServer {
         }
         await server.appendRoute("POST /seekRelative") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(SeekRelativeRequest.self, from: body) else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: SeekRelativeRequest
+            switch await decodeBody(SeekRelativeRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
             let delta = req.delta
             await MainActor.run {
@@ -76,9 +114,10 @@ extension RemoteControlServer {
         // ---- Volume / Mute ----
         await server.appendRoute("POST /volume") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(VolumeRequest.self, from: body) else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: VolumeRequest
+            switch await decodeBody(VolumeRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
             let clamped = max(0.0, min(1.0, req.volume))
             await MainActor.run { PlaybackController.shared.setVolume(clamped) }
@@ -114,31 +153,34 @@ extension RemoteControlServer {
         // ---- Queue ops ----
         await server.appendRoute("POST /queue/play") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(IndexRequest.self, from: body),
-                  req.index >= 0 else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: IndexRequest
+            switch await decodeBody(IndexRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
+            guard req.index >= 0 else { return RemoteResponse.badRequest("invalid body") }
             await MainActor.run { PlaybackController.shared.playTrackAtIndex(req.index) }
             return RemoteResponse.ok
         }
         await server.appendRoute("POST /queue/remove") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(IndexRequest.self, from: body),
-                  req.index >= 0 else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: IndexRequest
+            switch await decodeBody(IndexRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
+            guard req.index >= 0 else { return RemoteResponse.badRequest("invalid body") }
             await MainActor.run { PlaybackController.shared.removeFromQueue(at: req.index) }
             return RemoteResponse.ok
         }
         await server.appendRoute("POST /queue/move") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(MoveRequest.self, from: body),
-                  req.from >= 0, req.to >= 0 else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: MoveRequest
+            switch await decodeBody(MoveRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
+            guard req.from >= 0, req.to >= 0 else { return RemoteResponse.badRequest("invalid body") }
             await MainActor.run { PlaybackController.shared.moveQueueItem(from: req.from, to: req.to) }
             return RemoteResponse.ok
         }
@@ -192,6 +234,35 @@ enum RemoteResponse {
             headers: [.contentType: "application/json; charset=utf-8"],
             body: payload
         )
+    }
+}
+
+/// Outcome of decoding a request body. Either yields the decoded value or
+/// the 400-response that should be returned to the client immediately.
+enum DecodedBody<T> {
+    case value(T)
+    case failure(HTTPResponse)
+}
+
+/// Read the request body and decode it as the supplied `Decodable` type.
+/// Returns a ready-to-return 400 response if reading or decoding fails,
+/// after logging the underlying error via `Logger.error` (project
+/// convention — `try?` swallows the cause and makes failures invisible).
+@Sendable
+func decodeBody<T: Decodable>(_ type: T.Type, from request: HTTPRequest) async -> DecodedBody<T> {
+    let data: Data
+    do {
+        data = try await request.bodyData
+    } catch {
+        Logger.error("[RemoteControl] failed to read request body for \(type): \(error)")
+        return .failure(RemoteResponse.badRequest("invalid body"))
+    }
+    do {
+        let value = try JSONDecoder().decode(type, from: data)
+        return .value(value)
+    } catch {
+        Logger.error("[RemoteControl] failed to decode \(type): \(error)")
+        return .failure(RemoteResponse.badRequest("invalid body"))
     }
 }
 

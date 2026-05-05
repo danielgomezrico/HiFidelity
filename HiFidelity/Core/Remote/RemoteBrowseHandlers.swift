@@ -12,6 +12,83 @@ import Foundation
 import FlyingFox
 import GRDB
 
+// MARK: - Browse DTOs
+//
+// Wire DTOs for the browse endpoints. All artwork blobs are dropped —
+// remote clients fetch artwork separately via /artwork/:trackId with
+// the persistent ETag-driven cache.
+
+/// Page wrapper for /tracks responses.
+struct RemoteTracksPage: Encodable {
+    let tracks: [RemoteTrack]
+    let total: Int
+    let limit: Int
+    let offset: Int
+}
+
+/// Page wrapper for /albums responses.
+struct RemoteAlbum: Encodable {
+    let id: Int64
+    let title: String
+    let albumArtist: String?
+    let year: String?
+    let trackCount: Int
+    let totalDuration: Double
+    let releaseType: String?
+
+    init?(_ a: Album) {
+        guard let aid = a.id else { return nil }
+        self.id = aid
+        self.title = a.title
+        self.albumArtist = a.albumArtist
+        self.year = a.year
+        self.trackCount = a.trackCount
+        self.totalDuration = a.totalDuration
+        self.releaseType = a.releaseType
+        // INVARIANT: a.artworkData is intentionally never read here.
+    }
+}
+
+struct RemoteArtist: Encodable {
+    let id: Int64
+    let name: String
+    let trackCount: Int
+    let albumCount: Int
+
+    init?(_ a: Artist) {
+        guard let aid = a.id else { return nil }
+        self.id = aid
+        self.name = a.name
+        self.trackCount = a.trackCount
+        self.albumCount = a.albumCount
+        // INVARIANT: a.artworkData is intentionally never read here.
+    }
+}
+
+struct RemotePlaylist: Encodable {
+    let id: Int64
+    let name: String
+    let description: String?
+    let trackCount: Int
+    let totalDuration: Double
+    let isFavorite: Bool
+    let isSmart: Bool
+    let playCount: Int
+
+    init?(_ p: Playlist) {
+        guard let pid = p.id else { return nil }
+        self.id = pid
+        self.name = p.name
+        self.description = p.description
+        self.trackCount = p.trackCount
+        self.totalDuration = p.totalDuration
+        self.isFavorite = p.isFavorite
+        self.isSmart = p.isSmart
+        self.playCount = p.playCount
+        // INVARIANT: p.customArtworkData is intentionally never read here.
+    }
+}
+
 extension RemoteControlServer {
     /// Register the M4 browse + queue-from-browse routes on the server.
     func registerBrowseRoutes(on server: HTTPServer) async {
@@ -30,9 +107,10 @@ extension RemoteControlServer {
             let q = request.query.first(where: { $0.name == "q" })?.value
             do {
                 if let q, !q.isEmpty {
-                    // B004: fetch up to `offset + limit` weighted results and
-                    // slice the requested page out. `total` reflects the real
-                    // match count up to the search ceiling.
+                    // searchTracks doesn't take an offset, so fetch up to
+                    // `offset + limit` weighted results and slice the page
+                    // out in memory. `total` reflects the real match count
+                    // up to the search ceiling so the client can paginate.
                     let ceiling = max(1, min(offset + limit, 10_000))
                     let allMatches = try await DatabaseManager.shared.searchTracks(query: q, limit: ceiling)
                     let allDTOs = allMatches.compactMap { RemoteTrack($0) }
@@ -57,8 +135,8 @@ extension RemoteControlServer {
             do {
                 let albums: [Album]
                 if let q, !q.isEmpty {
-                    // B005: paginate search results in-memory since
-                    // `searchAlbums` doesn't take an offset.
+                    // searchAlbums doesn't take an offset — paginate the
+                    // ranked result list in memory.
                     let ceiling = max(1, min(offset + limit, 10_000))
                     let all = try await DatabaseManager.shared.searchAlbums(query: q, limit: ceiling)
                     let lower = min(offset, all.count)
@@ -88,8 +166,8 @@ extension RemoteControlServer {
             do {
                 let artists: [Artist]
                 if let q, !q.isEmpty {
-                    // B005: paginate search results in-memory since
-                    // `searchArtists` doesn't take an offset.
+                    // searchArtists doesn't take an offset — paginate the
+                    // ranked result list in memory.
                     let ceiling = max(1, min(offset + limit, 10_000))
                     let all = try await DatabaseManager.shared.searchArtists(query: q, limit: ceiling)
                     let lower = min(offset, all.count)
@@ -180,9 +258,10 @@ extension RemoteControlServer {
         // POST /queue/playTracks { trackIds: [Int64], startAt: Int }
         await server.appendRoute("POST /queue/playTracks") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(PlayTracksRequest.self, from: body) else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: PlayTracksRequest
+            switch await decodeBody(PlayTracksRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
             guard !req.trackIds.isEmpty else {
                 return RemoteResponse.badRequest("trackIds empty")
@@ -206,9 +285,10 @@ extension RemoteControlServer {
         // POST /queue/add { trackIds: [Int64] }
         await server.appendRoute("POST /queue/add") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(TrackIdsRequest.self, from: body) else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: TrackIdsRequest
+            switch await decodeBody(TrackIdsRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
             guard !req.trackIds.isEmpty else {
                 return RemoteResponse.badRequest("trackIds empty")
@@ -231,9 +311,10 @@ extension RemoteControlServer {
         // POST /queue/playNext { trackIds: [Int64] }
         await server.appendRoute("POST /queue/playNext") { request in
             guard isRemoteOriginAllowed(request) else { return RemoteResponse.forbidden("origin not allowed") }
-            guard let body = try? await request.bodyData,
-                  let req = try? JSONDecoder().decode(TrackIdsRequest.self, from: body) else {
-                return RemoteResponse.badRequest("invalid body")
+            let req: TrackIdsRequest
+            switch await decodeBody(TrackIdsRequest.self, from: request) {
+            case .value(let v): req = v
+            case .failure(let r): return r
             }
             guard !req.trackIds.isEmpty else {
                 return RemoteResponse.badRequest("trackIds empty")

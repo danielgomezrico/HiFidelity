@@ -22,10 +22,11 @@ enum RemoteStateProvider {
         case .all: mode = "all"
         case .one: mode = "one"
         }
-        // B003: the wire `queue` is `compactMap`-filtered (drops tracks with
-        // no `trackId`), but `currentQueueIndex` indexes the unfiltered
-        // queue. Build a side-table mapping original -> filtered index so
-        // the wire pair always describes the same array.
+        // The wire `queue` is compactMap-filtered to drop tracks with nil
+        // `trackId`, but `currentQueueIndex` indexes the unfiltered queue.
+        // Build a side-table mapping original -> filtered index so the
+        // wire pair (queue, currentQueueIndex) always describes the same
+        // array — otherwise the client would highlight the wrong row.
         let unfiltered = pc.queue
         var filtered: [RemoteTrack] = []
         filtered.reserveCapacity(unfiltered.count)
@@ -56,8 +57,9 @@ enum RemoteStateProvider {
         }
         let currentDTO = pc.currentTrack.flatMap { RemoteTrack($0) }
         let streamDTO = pc.currentStreamInfo.map { RemoteStreamInfo($0) }
-        // B008: mirror the write-side clamp so the wire never leaks an
-        // out-of-range value (NaN client-side falls back only on null).
+        // Clamp the wire volume to [0,1] and substitute 0.7 for NaN — the
+        // client only falls back to a default when the field is null, so
+        // a NaN here would silently disable the slider.
         let rawVolume = pc.volume
         let clampedVolume = rawVolume.isNaN ? 0.7 : max(0.0, min(1.0, rawVolume))
         return RemoteState(

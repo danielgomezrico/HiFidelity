@@ -37,8 +37,9 @@
   var currentArtworkId = null;
   var pollTimer = null;
 
-  // B009: when /artwork/<id> 404s (or fails to decode), hide the broken
-  // <img> and reveal the text fallback. Re-armed on every new trackId.
+  // When /artwork/<id> 404s (or fails to decode), hide the broken <img>
+  // and reveal the text fallback. Re-armed on every new trackId so that
+  // navigating back to a working track restores the image.
   els.art.addEventListener("error", function () {
     els.art.style.display = "none";
     els.artFallback.hidden = false;
@@ -131,8 +132,9 @@
       if (json) render(json);
       schedulePoll(POLL_MS);
     }).catch(function (err) {
-      // B011: invalidate ETag so the next successful poll receives a full
-      // 200 response instead of a 304 against a stale cached state.
+      // Invalidate the cached ETag on error so the next successful poll
+      // receives a full 200 response — otherwise the server might match
+      // the stale tag and reply 304, leaving the UI frozen.
       lastEtag = null;
       setConn("error", "Offline");
       schedulePoll(BACKOFF_MS);
@@ -213,9 +215,9 @@
   var navStack = [];
   var searchDebounce = null;
 
-  // B013: cancel any pending search debounce — call on every nav transition
-  // (tab switch, back, close, entity push) so a stale "Tracks" search can't
-  // populate an "Albums" drawer after the tab changed.
+  // Cancel any pending search debounce — call on every nav transition
+  // (tab switch, back, close, entity push) so a stale "Tracks" search
+  // can't populate an "Albums" drawer after the tab changed.
   function cancelSearchDebounce() {
     if (searchDebounce) {
       clearTimeout(searchDebounce);
@@ -308,7 +310,7 @@
     });
   }
 
-  // B012: hard-cap entity track fetches at 200 rows to avoid O(N) DOM
+  // Hard-cap entity track fetches at 200 rows to avoid O(N) DOM
   // construction and a thundering herd of /artwork/<id> requests on
   // 1000-track albums or smart playlists. Server enforcement is out of
   // scope for v1; this is the client-side guard.

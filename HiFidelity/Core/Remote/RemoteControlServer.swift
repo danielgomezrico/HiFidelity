@@ -9,6 +9,51 @@
 import Foundation
 import FlyingFox
 
+// MARK: - Settings accessors
+
+/// Centralized accessors for the remote-control UserDefaults keys.
+/// Single read site so the rest of the codebase can stay UserDefaults-string free.
+enum RemoteSettings {
+    /// UserDefaults key names. Keep in sync with `@AppStorage` keys in
+    /// `RemoteControlSettings.swift`.
+    enum Keys {
+        static let enabled = "remote.enabled"
+        static let port = "remote.port"
+        static let bonjourName = "remote.bonjourName"
+    }
+
+    /// Whether the user has enabled the HTTP remote-control server.
+    /// Default: `false` (off, opt-in feature).
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: Keys.enabled)
+    }
+
+    /// Default TCP port the server binds to. macOS sandbox blocks ports < 1024
+    /// for non-root processes, so we default to a high IANA-unassigned port.
+    static let defaultPort: UInt16 = 7666
+
+    /// User-configured port, clamped into a safe sandboxed range.
+    static var port: UInt16 {
+        let raw = UserDefaults.standard.object(forKey: Keys.port) as? Int
+        guard let raw, raw >= 1024, raw <= 65535 else { return defaultPort }
+        return UInt16(raw)
+    }
+
+    /// Resolved Bonjour service name. Falls back to the Mac's localized name,
+    /// then to a fixed string so the field is never empty.
+    static var bonjourName: String {
+        if let stored = UserDefaults.standard.string(forKey: Keys.bonjourName),
+           !stored.trimmingCharacters(in: .whitespaces).isEmpty {
+            return stored
+        }
+        if let host = ProcessInfo.processInfo.hostName.split(separator: ".").first,
+           !host.isEmpty {
+            return String(host)
+        }
+        return "HiFidelity"
+    }
+}
+
 /// Long-lived `@MainActor` singleton that owns the FlyingFox `HTTPServer`
 /// instance and its lifecycle. Reads/writes must occur on the main actor;
 /// route handlers (which run on FlyingFox's executor) explicitly hop here
@@ -198,20 +243,20 @@ final class RemoteControlServer: ObservableObject {
     /// HEAD mirrors GET (RFC 9110): same headers, empty body.
     private func registerWebUIRoutes(on server: HTTPServer) async {
         let webSubdir = "RemoteControl/web"
-        let indexHandler = BundleHTTPHandler(
+        let indexHandler = RemoteBundleHTTPHandler(
             resourceName: "index",
             resourceExtension: "html",
             subdirectory: webSubdir,
             contentType: "text/html; charset=utf-8",
             cacheControl: "no-cache"
         )
-        let appJsHandler = BundleHTTPHandler(
+        let appJsHandler = RemoteBundleHTTPHandler(
             resourceName: "app",
             resourceExtension: "js",
             subdirectory: webSubdir,
             contentType: "application/javascript; charset=utf-8"
         )
-        let styleCssHandler = BundleHTTPHandler(
+        let styleCssHandler = RemoteBundleHTTPHandler(
             resourceName: "style",
             resourceExtension: "css",
             subdirectory: webSubdir,
@@ -308,8 +353,34 @@ final class RemoteControlServer: ObservableObject {
 }
 
 /// Drop the body from an HTTPResponse, preserving status code and headers.
-/// Used for HEAD handlers that mirror GET. (B006)
+/// Used for HEAD handlers that mirror GET (RFC 9110: HEAD = GET sans body).
 @Sendable
 func stripBody(_ response: HTTPResponse) async -> HTTPResponse {
     HTTPResponse(statusCode: response.statusCode, headers: response.headers, body: Data())
+}
+
+// MARK: - Bonjour delegate
+
+/// `NetServiceDelegate` that captures the published name (which Bonjour may
+/// rename on collision, e.g. "HiFidelity (2)") and surfaces it back to
+/// `RemoteControlServer`.
+final class RemoteBonjourDelegate: NSObject, NetServiceDelegate {
+    private let onResolved: @Sendable (String) -> Void
+
+    init(onResolved: @escaping @Sendable (String) -> Void) {
+        self.onResolved = onResolved
+    }
+
+    func netServiceDidPublish(_ sender: NetService) {
+        Logger.info("Bonjour: published _hifidelity._tcp as \"\(sender.name)\" on port \(sender.port)")
+        onResolved(sender.name)
+    }
+
+    func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
+        Logger.error("Bonjour: failed to publish _hifidelity._tcp: \(errorDict)")
+    }
+
+    func netServiceDidStop(_ sender: NetService) {
+        Logger.debug("Bonjour: stopped publishing _hifidelity._tcp \"\(sender.name)\"")
+    }
 }

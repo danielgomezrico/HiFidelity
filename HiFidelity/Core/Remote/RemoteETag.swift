@@ -1,5 +1,5 @@
 //
-//  ETag.swift
+//  RemoteETag.swift
 //  HiFidelity
 //
 //  Hash-derived ETag generation for the HTTP remote-control state route.
