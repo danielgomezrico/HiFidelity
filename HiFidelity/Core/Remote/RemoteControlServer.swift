@@ -8,7 +8,6 @@
 
 import Foundation
 import FlyingFox
-import Network
 
 /// Long-lived `@MainActor` singleton that owns the FlyingFox `HTTPServer`
 /// instance and its lifecycle. Reads/writes must occur on the main actor;
@@ -32,7 +31,6 @@ final class RemoteControlServer: ObservableObject {
     private var serverTask: Task<Void, Never>?
     private var netService: NetService?
     private var bonjourDelegate: RemoteBonjourDelegate?
-    private var pathMonitor: NWPathMonitor?
 
     private init() {
         // Resolve initial port + Bonjour name from UserDefaults via the
@@ -95,15 +93,15 @@ final class RemoteControlServer: ObservableObject {
         // main run loop; we are already on @MainActor here.
         publishBonjour(name: resolvedName, port: resolvedPort)
 
-        // Start watching interface changes so Settings always shows live
-        // URLs after Wi-Fi joins/leaves, Tailscale toggles, etc.
-        startPathMonitor()
+        // Populate the URL list once at startup. Settings refreshes on
+        // appear and via the manual "Refresh URLs" button after that —
+        // network interface changes are infrequent and the live monitor
+        // wasn't worth its overhead.
         refreshAllURLs()
     }
 
     /// Stop the HTTP server. No-op if not running.
     func stop() async {
-        stopPathMonitor()
         unpublishBonjour()
         primaryURL = nil
         allURLs = []
@@ -153,26 +151,11 @@ final class RemoteControlServer: ObservableObject {
         bonjourDelegate = nil
     }
 
-    // MARK: - Path monitoring + URL list
+    // MARK: - URL list
 
-    private func startPathMonitor() {
-        let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.refreshAllURLs()
-            }
-        }
-        monitor.start(queue: .main)
-        self.pathMonitor = monitor
-    }
-
-    private func stopPathMonitor() {
-        pathMonitor?.cancel()
-        pathMonitor = nil
-    }
-
-    /// Refresh the list of URLs that point at this server. Called whenever
-    /// `NWPathMonitor` reports an interface change.
+    /// Recompute the list of URLs that point at this server. Called once on
+    /// `start()`, again from the Settings pane (`onAppear` + manual refresh
+    /// button) — there is no live network monitor.
     func refreshAllURLs() {
         let port = self.port
         let ips = NetworkInterfaceLister.activeIPv4Addresses()

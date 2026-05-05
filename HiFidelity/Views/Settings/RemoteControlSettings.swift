@@ -41,6 +41,12 @@ struct RemoteControlSettings: View {
         .onAppear {
             portString = String(portValue)
             nameString = bonjourNameStored.isEmpty ? RemoteSettings.bonjourName : bonjourNameStored
+            // Recompute the URL list each time the pane appears so the
+            // shown addresses reflect the current network state without
+            // running a live NWPathMonitor in the background.
+            if server.isRunning {
+                server.refreshAllURLs()
+            }
         }
     }
 
@@ -112,9 +118,22 @@ struct RemoteControlSettings: View {
 
     private var addressesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Connect from another device")
-                .font(.title3)
-                .fontWeight(.semibold)
+            HStack {
+                Text("Connect from another device")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Spacer()
+                if server.isRunning {
+                    Button {
+                        server.refreshAllURLs()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Refresh URLs")
+                }
+            }
             Text("Open this URL in Safari on your iPad or phone.")
                 .font(.caption)
                 .foregroundColor(.secondary)
