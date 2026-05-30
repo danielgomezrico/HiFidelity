@@ -51,12 +51,19 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  /* Center the stack vertically on tall phones; `safe` falls back to
+     top-aligned if content ever exceeds the viewport so nothing clips. */
+  justify-content: safe center;
   gap: 16px;
   max-width: 480px;
   margin: 0 auto;
   padding: 16px env(safe-area-inset-right, 16px) calc(16px + env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 16px);
   min-height: 100vh;
+  min-height: 100dvh;
 }
+/* Only the artwork flexes; controls keep their intrinsic size so they
+   never get squeezed off-screen. */
+.hdr, .meta, .seek, .transport, .extras { flex: 0 0 auto; }
 
 .hdr {
   display: flex;
@@ -71,8 +78,17 @@ html, body {
 
 .art-wrap {
   position: relative;
-  aspect-ratio: 1 / 1;
-  width: 100%;
+  /* Perfect square sized to the smallest of: available width (phones),
+     480-px desktop cap, and the viewport height left over after the
+     controls. The height term shrinks the artwork on tall phones so the
+     transport + extras rows always stay above the fold. flex:0 0 auto keeps
+     the flex layout from resizing the square. */
+  --side: min(100vw - 32px, 448px, 100vh - 420px);
+  --side: min(100vw - 32px, 448px, 100dvh - 420px);
+  width: var(--side);
+  height: var(--side);
+  margin: 0 auto;
+  flex: 0 0 auto;
   border-radius: 12px;
   overflow: hidden;
   background: var(--bg-elev);
