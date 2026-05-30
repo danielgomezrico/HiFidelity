@@ -285,9 +285,19 @@ final class RemoteControlServer: ObservableObject {
             subdirectory: webSubdir,
             contentType: "image/png"
         )
+        // Service worker must be served from the scope root (`/sw.js`) with
+        // `no-cache` so browsers always revalidate it and pick up updates.
+        let swHandler = RemoteBundleHTTPHandler(
+            resourceName: "sw",
+            resourceExtension: "js",
+            subdirectory: webSubdir,
+            contentType: "application/javascript; charset=utf-8",
+            cacheControl: "no-cache"
+        )
         await server.appendRoute("GET /manifest.webmanifest", to: manifestHandler)
         await server.appendRoute("GET /assets/icon-192.png", to: icon192Handler)
         await server.appendRoute("GET /assets/icon-512.png", to: icon512Handler)
+        await server.appendRoute("GET /sw.js", to: swHandler)
 
         // HEAD: rerun the GET path but drop the body. (B006)
         await server.appendRoute("HEAD /") { request in
@@ -310,6 +320,9 @@ final class RemoteControlServer: ObservableObject {
         }
         await server.appendRoute("HEAD /assets/icon-512.png") { request in
             await stripBody(try await icon512Handler.handleRequest(request))
+        }
+        await server.appendRoute("HEAD /sw.js") { request in
+            await stripBody(try await swHandler.handleRequest(request))
         }
     }
 
