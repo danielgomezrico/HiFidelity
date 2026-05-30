@@ -3,7 +3,9 @@
 // command POSTs always hit the network and are never cached.
 "use strict";
 
-var CACHE = "hifi-remote-v1";
+// Bump this whenever the shell assets change so an already-installed PWA
+// drops the stale cache on activate and picks up the new build.
+var CACHE = "hifi-remote-v2";
 var SHELL = [
   "/",
   "/index.html",
@@ -51,13 +53,17 @@ self.addEventListener("fetch", function (e) {
     return;
   }
 
-  // Static shell assets: cache-first, refreshing the entry in the background.
+  // Static shell assets: stale-while-revalidate. Serve the cached copy
+  // immediately (instant load, works offline) while fetching a fresh copy in
+  // the background, so the next load self-heals after a new app build.
   e.respondWith(
-    caches.match(req).then(function (hit) {
-      return hit || fetch(req).then(function (res) {
-        var copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put(req, copy); });
-        return res;
+    caches.open(CACHE).then(function (c) {
+      return c.match(req).then(function (hit) {
+        var network = fetch(req).then(function (res) {
+          if (res && res.ok) c.put(req, res.clone());
+          return res;
+        }).catch(function () { return hit; });
+        return hit || network;
       });
     })
   );
