@@ -91,12 +91,17 @@
     if (!seekDragging) {
       var dur = s.duration > 0 ? s.duration : 0;
       els.seek.max = dur || 1;
-      els.seek.value = Math.min(s.currentTime || 0, dur || 0);
+      var currentTime = Math.min(s.currentTime || 0, dur || 0);
+      els.seek.value = currentTime;
+      var pct = dur > 0 ? (currentTime / dur) * 100 : 0;
+      els.seek.style.setProperty('--value', pct + '%');
       els.timeCurrent.textContent = fmtTime(s.currentTime || 0);
       els.timeTotal.textContent = fmtTime(dur);
     }
     if (!volDragging) {
-      els.vol.value = s.volume == null ? 0.7 : s.volume;
+      var vol = s.volume == null ? 0.7 : s.volume;
+      els.vol.value = vol;
+      els.vol.style.setProperty('--value', (vol * 100) + '%');
     }
 
     els.playGlyph.textContent = s.isPlaying ? "❚❚" : "▶";
