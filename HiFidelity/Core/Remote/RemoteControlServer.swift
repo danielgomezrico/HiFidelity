@@ -250,17 +250,23 @@ final class RemoteControlServer: ObservableObject {
             contentType: "text/html; charset=utf-8",
             cacheControl: "no-cache"
         )
+        // app.js / style.css ship inside the app bundle and change with every
+        // build, so revalidate on each load (`no-cache`) — otherwise browsers
+        // serve a stale UI for up to an hour after an app update. Offline
+        // caching is handled by the service worker, not the HTTP layer.
         let appJsHandler = RemoteBundleHTTPHandler(
             resourceName: "app",
             resourceExtension: "js",
             subdirectory: webSubdir,
-            contentType: "application/javascript; charset=utf-8"
+            contentType: "application/javascript; charset=utf-8",
+            cacheControl: "no-cache"
         )
         let styleCssHandler = RemoteBundleHTTPHandler(
             resourceName: "style",
             resourceExtension: "css",
             subdirectory: webSubdir,
-            contentType: "text/css; charset=utf-8"
+            contentType: "text/css; charset=utf-8",
+            cacheControl: "no-cache"
         )
         await server.appendRoute("GET /", to: indexHandler)
         await server.appendRoute("GET /index.html", to: indexHandler)
