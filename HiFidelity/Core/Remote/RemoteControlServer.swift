@@ -266,6 +266,28 @@ final class RemoteControlServer: ObservableObject {
         await server.appendRoute("GET /index.html", to: indexHandler)
         await server.appendRoute("GET /assets/app.js", to: appJsHandler)
         await server.appendRoute("GET /assets/style.css", to: styleCssHandler)
+        let manifestHandler = RemoteBundleHTTPHandler(
+            resourceName: "manifest",
+            resourceExtension: "webmanifest",
+            subdirectory: webSubdir,
+            contentType: "application/manifest+json",
+            cacheControl: "no-cache"
+        )
+        let icon192Handler = RemoteBundleHTTPHandler(
+            resourceName: "icon-192",
+            resourceExtension: "png",
+            subdirectory: webSubdir,
+            contentType: "image/png"
+        )
+        let icon512Handler = RemoteBundleHTTPHandler(
+            resourceName: "icon-512",
+            resourceExtension: "png",
+            subdirectory: webSubdir,
+            contentType: "image/png"
+        )
+        await server.appendRoute("GET /manifest.webmanifest", to: manifestHandler)
+        await server.appendRoute("GET /assets/icon-192.png", to: icon192Handler)
+        await server.appendRoute("GET /assets/icon-512.png", to: icon512Handler)
 
         // HEAD: rerun the GET path but drop the body. (B006)
         await server.appendRoute("HEAD /") { request in
@@ -279,6 +301,15 @@ final class RemoteControlServer: ObservableObject {
         }
         await server.appendRoute("HEAD /assets/style.css") { request in
             await stripBody(try await styleCssHandler.handleRequest(request))
+        }
+        await server.appendRoute("HEAD /manifest.webmanifest") { request in
+            await stripBody(try await manifestHandler.handleRequest(request))
+        }
+        await server.appendRoute("HEAD /assets/icon-192.png") { request in
+            await stripBody(try await icon192Handler.handleRequest(request))
+        }
+        await server.appendRoute("HEAD /assets/icon-512.png") { request in
+            await stripBody(try await icon512Handler.handleRequest(request))
         }
     }
 
