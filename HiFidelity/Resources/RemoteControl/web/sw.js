@@ -5,7 +5,7 @@
 
 // Bump this whenever the shell assets change so an already-installed PWA
 // drops the stale cache on activate and picks up the new build.
-var CACHE = "hifi-remote-v2";
+var CACHE = "hifi-remote-v3";
 var SHELL = [
   "/",
   "/index.html",
@@ -42,8 +42,6 @@ self.addEventListener("fetch", function (e) {
   if (req.method !== "GET") return;
 
   var url = new URL(req.url);
-  // Live data must stay fresh: bypass the cache entirely.
-  if (url.pathname === "/state" || url.pathname.indexOf("/artwork/") === 0) return;
 
   // Navigations: network-first, fall back to the cached shell when offline.
   if (req.mode === "navigate") {
@@ -52,6 +50,14 @@ self.addEventListener("fetch", function (e) {
     );
     return;
   }
+
+  // Only the static app shell is cacheable. Everything else — /state,
+  // /artwork/<id>, and the dynamic library API (/tracks, /albums, /artists,
+  // /playlists and their search variants with ?q=) — MUST hit the network so
+  // results are never served stale. Caching those was making library search
+  // and lists go empty/stale on an installed PWA.
+  var isShell = url.pathname === "/" || SHELL.indexOf(url.pathname) !== -1;
+  if (!isShell) return;
 
   // Static shell assets: stale-while-revalidate. Serve the cached copy
   // immediately (instant load, works offline) while fetching a fresh copy in
