@@ -220,6 +220,27 @@
   var navStack = [];
   var searchDebounce = null;
 
+  // Monotonically increasing counter. Bumped on every nav transition and on
+  // every fresh list load. Fetches capture the value at dispatch time and
+  // check it on resolution — a mismatched seq means the context changed while
+  // the request was in flight, so the result is silently dropped.
+  var loadSeq = 0;
+
+  var PAGE_SIZE = 100;
+
+  // IntersectionObserver for the scroll sentinel. Disconnected on each fresh
+  // list load and re-armed after the first page renders.
+  var sentinelObserver = null;
+
+  function teardownSentinel() {
+    if (sentinelObserver) {
+      sentinelObserver.disconnect();
+      sentinelObserver = null;
+    }
+    var old = drawerEls.list.querySelector(".scroll-sentinel");
+    if (old) old.remove();
+  }
+
   // Cancel any pending search debounce — call on every nav transition
   // (tab switch, back, close, entity push) so a stale "Tracks" search
   // can't populate an "Albums" drawer after the tab changed.
@@ -241,10 +262,14 @@
   }
   function hideDrawer() {
     cancelSearchDebounce();
+    teardownSentinel();
+    loadSeq++;
     drawerEls.drawer.hidden = true;
   }
   function popOrClose() {
     cancelSearchDebounce();
+    teardownSentinel();
+    loadSeq++;
     if (navStack.length > 1) {
       navStack.pop();
       renderCurrent();
@@ -287,64 +312,25 @@
     setListEmpty("Loading…");
   }
 
-  function listURL(top) {
+  function listURL(top, offset) {
     var qs = [];
-    qs.push("limit=200");
+    qs.push("limit=" + PAGE_SIZE);
+    qs.push("offset=" + offset);
     if (top.q) qs.push("q=" + encodeURIComponent(top.q));
     var path = "/" + top.tab;
     return path + "?" + qs.join("&");
   }
 
-  function loadList(top) {
-    setListSpinner();
-    fetch(listURL(top), { cache: "no-store" }).then(function (r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    }).then(function (data) {
-      if (top.tab === "tracks") {
-        renderTracks(data.tracks || []);
-      } else if (top.tab === "albums") {
-        renderAlbums(data || []);
-      } else if (top.tab === "artists") {
-        renderArtists(data || []);
-      } else if (top.tab === "playlists") {
-        renderPlaylists(data || []);
-      }
-    }).catch(function () {
-      setListEmpty("Couldn't load.");
-    });
-  }
-
-  // Hard-cap entity track fetches at 200 rows to avoid O(N) DOM
-  // construction and a thundering herd of /artwork/<id> requests on
-  // 1000-track albums or smart playlists. Server enforcement is out of
-  // scope for v1; this is the client-side guard.
-  var ENTITY_TRACKS_LIMIT = 200;
-
-  function loadEntityTracks(top) {
-    setListSpinner();
-    var path;
-    if (top.kind === "album") path = "/albums/" + top.id + "/tracks";
-    else if (top.kind === "artist") path = "/artists/" + top.id + "/tracks";
-    else if (top.kind === "playlist") path = "/playlists/" + top.id + "/tracks";
-    else { setListEmpty(""); return; }
-    path += "?limit=" + ENTITY_TRACKS_LIMIT;
-
-    fetch(path, { cache: "no-store" }).then(function (r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    }).then(function (tracks) {
-      renderTracks(tracks || []);
-    }).catch(function () {
-      setListEmpty("Couldn't load.");
-    });
-  }
-
-  function renderTracks(tracks) {
-    if (!tracks.length) { setListEmpty("No tracks."); return; }
-    var ids = tracks.map(function (t) { return t.trackId; });
+  // Append track rows for one page onto drawerEls.list.
+  // `sharedIds` is the single array shared across all pages of this load;
+  // rows close over it by reference so a click always sees the full
+  // accumulated list at the moment it fires, not just the page snapshot.
+  function appendTrackRows(tracks, sharedIds) {
+    var startIdx = sharedIds.length;
+    tracks.forEach(function (t) { sharedIds.push(t.trackId); });
     var frag = document.createDocumentFragment();
-    tracks.forEach(function (t, idx) {
+    tracks.forEach(function (t, i) {
+      var idx = startIdx + i;
       var row = document.createElement("div");
       row.className = "row";
       row.innerHTML =
@@ -358,16 +344,15 @@
       row.querySelector(".row-sub").textContent = (t.artist || "") + (t.album ? " · " + t.album : "");
       row.querySelector(".row-meta").textContent = fmtSeconds(t.duration);
       row.addEventListener("click", function () {
-        postCmd("/queue/playTracks", { trackIds: ids, startAt: idx });
+        postCmd("/queue/playTracks", { trackIds: sharedIds, startAt: idx });
         hideDrawer();
       });
       frag.appendChild(row);
     });
-    drawerEls.list.replaceChildren(frag);
+    drawerEls.list.appendChild(frag);
   }
 
-  function renderAlbums(albums) {
-    if (!albums.length) { setListEmpty("No albums."); return; }
+  function appendAlbumRows(albums) {
     var frag = document.createDocumentFragment();
     albums.forEach(function (a) {
       var row = document.createElement("div");
@@ -389,11 +374,10 @@
       });
       frag.appendChild(row);
     });
-    drawerEls.list.replaceChildren(frag);
+    drawerEls.list.appendChild(frag);
   }
 
-  function renderArtists(artists) {
-    if (!artists.length) { setListEmpty("No artists."); return; }
+  function appendArtistRows(artists) {
     var frag = document.createDocumentFragment();
     artists.forEach(function (a) {
       var row = document.createElement("div");
@@ -414,7 +398,151 @@
       });
       frag.appendChild(row);
     });
-    drawerEls.list.replaceChildren(frag);
+    drawerEls.list.appendChild(frag);
+  }
+
+  // Arm the IntersectionObserver sentinel that fires the next page load.
+  // Called after each page that is not the last. `loadNextPage` is the
+  // callback that fetches page N+1.
+  function armSentinel(loadNextPage) {
+    teardownSentinel();
+    var sentinel = document.createElement("div");
+    sentinel.className = "scroll-sentinel";
+    drawerEls.list.appendChild(sentinel);
+
+    // threshold:0 fires as soon as a single pixel of the sentinel enters
+    // the viewport — the most reliable option for iOS Safari.
+    sentinelObserver = new IntersectionObserver(function (entries) {
+      if (entries[0].isIntersecting) {
+        teardownSentinel();
+        loadNextPage();
+      }
+    }, { threshold: 0 });
+    sentinelObserver.observe(sentinel);
+  }
+
+  function loadList(top) {
+    teardownSentinel();
+    loadSeq++;
+    var seq = loadSeq;
+
+    if (top.tab === "playlists") {
+      setListSpinner();
+      fetch(listURL(top, 0), { cache: "no-store" }).then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      }).then(function (data) {
+        if (seq !== loadSeq) return;
+        renderPlaylists(data || []);
+      }).catch(function () {
+        if (seq !== loadSeq) return;
+        setListEmpty("Couldn't load.");
+      });
+      return;
+    }
+
+    // One shared array for all pages of this load; rows close over it by
+    // reference so early-page clicks always queue the full accumulated list.
+    var sharedTrackIds = [];
+    setListSpinner();
+    loadPage(top, 0, seq, sharedTrackIds);
+  }
+
+  function loadPage(top, offset, seq, sharedTrackIds) {
+    fetch(listURL(top, offset), { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (data) {
+      // Drop result if context changed while this request was in flight.
+      if (seq !== loadSeq) return;
+
+      if (top.tab === "tracks") {
+        var tracks = (data && data.tracks) ? data.tracks : [];
+        var total = (data && data.total) ? data.total : 0;
+
+        if (offset === 0) {
+          if (!tracks.length) { setListEmpty("No tracks."); return; }
+          drawerEls.list.replaceChildren();
+        }
+        if (!tracks.length) return;
+
+        appendTrackRows(tracks, sharedTrackIds);
+        var rendered = sharedTrackIds.length;
+        var exhausted = total ? rendered >= total : tracks.length < PAGE_SIZE;
+        if (!exhausted) {
+          armSentinel(function () { loadPage(top, rendered, seq, sharedTrackIds); });
+        }
+
+      } else if (top.tab === "albums") {
+        var albums = data || [];
+
+        if (offset === 0) {
+          if (!albums.length) { setListEmpty("No albums."); return; }
+          drawerEls.list.replaceChildren();
+        }
+        if (!albums.length) return;
+
+        appendAlbumRows(albums);
+        if (albums.length >= PAGE_SIZE) {
+          armSentinel(function () { loadPage(top, offset + albums.length, seq, sharedTrackIds); });
+        }
+
+      } else if (top.tab === "artists") {
+        var artists = data || [];
+
+        if (offset === 0) {
+          if (!artists.length) { setListEmpty("No artists."); return; }
+          drawerEls.list.replaceChildren();
+        }
+        if (!artists.length) return;
+
+        appendArtistRows(artists);
+        if (artists.length >= PAGE_SIZE) {
+          armSentinel(function () { loadPage(top, offset + artists.length, seq, sharedTrackIds); });
+        }
+      }
+    }).catch(function () {
+      if (seq !== loadSeq) return;
+      if (offset === 0) setListEmpty("Couldn't load.");
+    });
+  }
+
+  // Hard-cap entity track fetches at 200 rows to avoid O(N) DOM
+  // construction and a thundering herd of /artwork/<id> requests on
+  // 1000-track albums or smart playlists. Server enforcement is out of
+  // scope for v1; this is the client-side guard.
+  var ENTITY_TRACKS_LIMIT = 200;
+
+  function loadEntityTracks(top) {
+    teardownSentinel();
+    loadSeq++;
+    var seq = loadSeq;
+    setListSpinner();
+    var path;
+    if (top.kind === "album") path = "/albums/" + top.id + "/tracks";
+    else if (top.kind === "artist") path = "/artists/" + top.id + "/tracks";
+    else if (top.kind === "playlist") path = "/playlists/" + top.id + "/tracks";
+    else { setListEmpty(""); return; }
+    path += "?limit=" + ENTITY_TRACKS_LIMIT;
+
+    fetch(path, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (tracks) {
+      if (seq !== loadSeq) return;
+      renderTracks(tracks || []);
+    }).catch(function () {
+      if (seq !== loadSeq) return;
+      setListEmpty("Couldn't load.");
+    });
+  }
+
+  // renderTracks is used only for entity-track detail views (album/artist/
+  // playlist). The paginated list tabs use appendTrackRows directly.
+  function renderTracks(tracks) {
+    if (!tracks.length) { setListEmpty("No tracks."); return; }
+    drawerEls.list.replaceChildren();
+    appendTrackRows(tracks, []);
   }
 
   function renderPlaylists(lists) {
@@ -448,6 +576,8 @@
   drawerEls.tabs.forEach(function (b) {
     b.addEventListener("click", function () {
       cancelSearchDebounce();
+      teardownSentinel();
+      loadSeq++;
       navStack = [{ kind: "list", tab: b.dataset.tab, q: "" }];
       renderCurrent();
     });
