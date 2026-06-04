@@ -410,14 +410,17 @@
     sentinel.className = "scroll-sentinel";
     drawerEls.list.appendChild(sentinel);
 
-    // threshold:0 fires as soon as a single pixel of the sentinel enters
-    // the viewport — the most reliable option for iOS Safari.
+    // The list (.drawer-list) is an internally-scrolling flex child, NOT the
+    // page — so the observer root MUST be that scroll container, not the
+    // default viewport, or the sentinel never registers as intersecting and
+    // only the first page ever loads. rootMargin prefetches the next page
+    // before the bottom is reached; threshold:0 fires on the first pixel.
     sentinelObserver = new IntersectionObserver(function (entries) {
       if (entries[0].isIntersecting) {
         teardownSentinel();
         loadNextPage();
       }
-    }, { threshold: 0 });
+    }, { root: drawerEls.list, rootMargin: "400px 0px", threshold: 0 });
     sentinelObserver.observe(sentinel);
   }
 

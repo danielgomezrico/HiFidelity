@@ -349,6 +349,12 @@ input[type="range"]::-moz-range-thumb {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+/* Non-zero height so the IntersectionObserver has a reliable target;
+   a zero-area element intersects unreliably across browsers. */
+.scroll-sentinel {
+  height: 1px;
+  width: 100%;
+}
 .row {
   display: flex;
   align-items: center;
