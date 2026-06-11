@@ -271,7 +271,16 @@ extension RemoteControlServer {
                 guard !tracks.isEmpty else {
                     return RemoteResponse.badRequest("no matching tracks")
                 }
-                let startAt = max(0, min(req.startAt, tracks.count - 1))
+                // Resolve startAt against the requested id, not the filtered
+                // index: fetchTracksByIds drops ids that no longer resolve, so
+                // a track deleted between list-load and tap would shift every
+                // index and start playback on the wrong row. Locate the tapped
+                // id in the surviving tracks; fall back to a clamped index when
+                // that id is itself gone.
+                let requestedIndex = max(0, min(req.startAt, req.trackIds.count - 1))
+                let targetId = req.trackIds[requestedIndex]
+                let startAt = tracks.firstIndex { $0.trackId == targetId }
+                    ?? max(0, min(req.startAt, tracks.count - 1))
                 await MainActor.run {
                     PlaybackController.shared.playTracks(tracks, startingAt: startAt)
                 }
