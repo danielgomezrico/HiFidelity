@@ -466,6 +466,15 @@ extension DatabaseManager {
     // depend on a healthy index. When the weighted FTS pass yields zero rows
     // we fall back to a case-insensitive LIKE scan of the content tables.
 
+    /// True when an FTS5 index has no rows — the desync symptom this fallback
+    /// exists for. A healthy, populated index that returns zero matches is a
+    /// genuine no-match (e.g. mid-typing "zzz") and must NOT trigger the O(N)
+    /// leading-wildcard LIKE scan. The table name is a hardcoded literal, not
+    /// user input, so interpolation here is safe.
+    private func ftsIndexIsEmpty(db: Database, table: String) throws -> Bool {
+        try Int.fetchOne(db, sql: "SELECT 1 FROM \(table) LIMIT 1") == nil
+    }
+
     /// Lowercased query terms with LIKE wildcards escaped (`\` is the ESCAPE
     /// char in the fallback SQL). Returns nil when nothing is searchable.
     private func likeTerms(from query: String) -> [String]? {
@@ -536,7 +545,9 @@ extension DatabaseManager {
 
         return try await dbQueue.read { db in
             let fts = try searchTracksWeighted(db: db, queries: queries, limit: limit)
-            return fts.isEmpty ? try searchTracksLike(db: db, query: query, limit: limit) : fts
+            if !fts.isEmpty { return fts }
+            guard try ftsIndexIsEmpty(db: db, table: "tracks_fts") else { return [] }
+            return try searchTracksLike(db: db, query: query, limit: limit)
         }
     }
 
@@ -548,7 +559,9 @@ extension DatabaseManager {
 
         return try await dbQueue.read { db in
             let fts = try searchAlbumsWeighted(db: db, queries: queries, limit: limit)
-            return fts.isEmpty ? try searchAlbumsLike(db: db, query: query, limit: limit) : fts
+            if !fts.isEmpty { return fts }
+            guard try ftsIndexIsEmpty(db: db, table: "albums_fts") else { return [] }
+            return try searchAlbumsLike(db: db, query: query, limit: limit)
         }
     }
 
@@ -560,7 +573,9 @@ extension DatabaseManager {
 
         return try await dbQueue.read { db in
             let fts = try searchArtistsWeighted(db: db, queries: queries, limit: limit)
-            return fts.isEmpty ? try searchArtistsLike(db: db, query: query, limit: limit) : fts
+            if !fts.isEmpty { return fts }
+            guard try ftsIndexIsEmpty(db: db, table: "artists_fts") else { return [] }
+            return try searchArtistsLike(db: db, query: query, limit: limit)
         }
     }
     
