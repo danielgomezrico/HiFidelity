@@ -17,6 +17,12 @@ struct RemoteBundleHTTPHandler: HTTPHandler {
     let contentType: String
     let cacheControl: String
 
+    // Bundle resources are static for the app's lifetime, so the file is read
+    // once at init and held in memory — every request (app.js/style.css are
+    // `no-cache`, so each page load would otherwise hit disk) serves the
+    // cached copy. `nil` means the resource was missing at startup → 404.
+    private let cachedData: Data?
+
     init(
         resourceName: String,
         resourceExtension: String,
@@ -29,9 +35,7 @@ struct RemoteBundleHTTPHandler: HTTPHandler {
         self.subdirectory = subdirectory
         self.contentType = contentType
         self.cacheControl = cacheControl
-    }
 
-    func handleRequest(_ request: HTTPRequest) async throws -> HTTPResponse {
         // Try the namespaced lookup first (folder reference layout) and
         // fall back to a flat lookup (synchronized group flattens
         // resources). Both are valid Xcode resource layouts.
@@ -45,18 +49,25 @@ struct RemoteBundleHTTPHandler: HTTPHandler {
         )
         guard let url else {
             Logger.error("RemoteBundleHTTPHandler: missing \(subdirectory)/\(resourceName).\(resourceExtension)")
-            return RemoteResponse.notFound("not found")
+            self.cachedData = nil
+            return
         }
         do {
-            let data = try Data(contentsOf: url)
-            let headers: HTTPHeaders = [
-                .contentType: contentType,
-                HTTPHeader("Cache-Control"): cacheControl
-            ]
-            return HTTPResponse(statusCode: .ok, headers: headers, body: data)
+            self.cachedData = try Data(contentsOf: url)
         } catch {
             Logger.error("RemoteBundleHTTPHandler: read failed for \(url.lastPathComponent): \(error)")
-            return RemoteResponse.serverError("read failed")
+            self.cachedData = nil
         }
+    }
+
+    func handleRequest(_ request: HTTPRequest) async throws -> HTTPResponse {
+        guard let cachedData else {
+            return RemoteResponse.notFound("not found")
+        }
+        let headers: HTTPHeaders = [
+            .contentType: contentType,
+            HTTPHeader("Cache-Control"): cacheControl
+        ]
+        return HTTPResponse(statusCode: .ok, headers: headers, body: cachedData)
     }
 }

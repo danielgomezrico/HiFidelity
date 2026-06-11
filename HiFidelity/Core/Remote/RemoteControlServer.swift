@@ -365,7 +365,10 @@ final class RemoteControlServer: ObservableObject {
 
         // GET /artwork/:trackId — raw bytes; ETag derives from id PLUS a
         // short content fingerprint so deleted/replaced artwork yields a
-        // fresh tag and never serves a 304 for a missing track.
+        // fresh tag and never serves a 304 for a missing track. Cache-Control
+        // omits `immutable` on purpose: the URL is id-addressed, not
+        // content-addressed, so the browser must revalidate against the
+        // fingerprint ETag to pick up re-tagged cover art.
         let artworkHandler: @Sendable (HTTPRequest) async throws -> HTTPResponse = { request in
             guard let raw = request.routeParameters["trackId"],
                   let trackId = Int64(raw) else {
@@ -380,14 +383,14 @@ final class RemoteControlServer: ObservableObject {
                 if let inm = request.headers[HTTPHeader("If-None-Match")], inm == tag {
                     let headers: HTTPHeaders = [
                         .eTag: tag,
-                        HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"
+                        HTTPHeader("Cache-Control"): "public, max-age=31536000"
                     ]
                     return HTTPResponse(statusCode: .notModified, headers: headers)
                 }
                 let headers: HTTPHeaders = [
                     .contentType: result.contentType,
                     .eTag: tag,
-                    HTTPHeader("Cache-Control"): "public, max-age=31536000, immutable"
+                    HTTPHeader("Cache-Control"): "public, max-age=31536000"
                 ]
                 return HTTPResponse(statusCode: .ok, headers: headers, body: result.data)
             } catch {
@@ -404,9 +407,16 @@ final class RemoteControlServer: ObservableObject {
 
 /// Drop the body from an HTTPResponse, preserving status code and headers.
 /// Used for HEAD handlers that mirror GET (RFC 9110: HEAD = GET sans body).
+/// RFC 9110 also says HEAD SHOULD report the same `Content-Length` a GET
+/// would; FlyingFox only auto-sets that header when absent, so we set it
+/// explicitly from the GET body size before emptying the body.
 @Sendable
 func stripBody(_ response: HTTPResponse) async -> HTTPResponse {
-    HTTPResponse(statusCode: response.statusCode, headers: response.headers, body: Data())
+    var headers = response.headers
+    if headers[.contentLength] == nil, let body = try? await response.bodyData {
+        headers[.contentLength] = String(body.count)
+    }
+    return HTTPResponse(statusCode: response.statusCode, headers: headers, body: Data())
 }
 
 // MARK: - Bonjour delegate
